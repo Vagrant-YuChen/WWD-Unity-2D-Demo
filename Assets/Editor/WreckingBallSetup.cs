@@ -44,6 +44,14 @@ public static class WreckingBallSetup
     /// <summary>球碰撞体子物体的名字，动画里按这个路径写球的本地坐标。</summary>
     private const string BallChildName = "Ball";
 
+    /// <summary>
+    /// 逐帧锚点的最终校准偏移（贴图像素，Y 向下为正）。
+    /// 这是把实测调到「完全贴合」后固化的值：滑轮支点仍取原始锚点（物理齿轮位置不变），
+    /// 只有每帧要贴到滑轮的锚点像素在此基础上 +X/-16，等价于当时实时调节器里的 Anchor Offset (24, -16)。
+    /// 改这里会改变最终贴合；想让链条贴合得不一样，直接调这两个数后重新 Rebuild 即可。
+    /// </summary>
+    private static readonly Vector2 AnchorFineTunePixels = new Vector2(24f, -16f);
+
     private struct FrameData
     {
         public readonly int width;
@@ -164,6 +172,7 @@ public static class WreckingBallSetup
         AssetDatabase.SaveAssets();
         Debug.Log("[WreckingBallSetup] 三套摆锤序列帧动画与状态机已刷新。");
     }
+
     #endregion
 
     #region 资源生成
@@ -261,7 +270,9 @@ public static class WreckingBallSetup
             Sprite sprite = LoadSprite(ChainFamily, frame);
             if (sprite == null) return;
 
-            Vector3 anchorLocal = PixelToSpriteLocal(sprite, Frames[frame].anchorX, Frames[frame].anchorY);
+            Vector3 anchorLocal = PixelToSpriteLocal(sprite,
+                Frames[frame].anchorX + AnchorFineTunePixels.x,
+                Frames[frame].anchorY + AnchorFineTunePixels.y);
             Vector3 centerWorld = pivotWorld - tr.rotation * Vector3.Scale(tr.lossyScale, anchorLocal);
             chainLocals[i] = tr.parent != null ? tr.parent.InverseTransformPoint(centerWorld) : centerWorld;
 
