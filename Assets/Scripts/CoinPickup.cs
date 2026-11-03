@@ -3,11 +3,17 @@ using TMPro;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-// 所有变量必须在类内部声明！
+/// <summary>
+/// 金币拾取：
+/// - 玩家靠近后按 F 拾取，金币计入分数并从地图消失（Destroy）。
+/// - 为兼容旧关卡（GameScene1），如果配置了胜利 UI（resultPanel 等），拾取时仍会触发原来的胜利流程；
+///   若未配置任何胜利 UI（如 GameScene2），则只会安静地加分并消失，不再弹 UI、不再冻结游戏。
+/// 提示：Scene2 的胜利判定已改由旗杆触发（见 FlagVictory）。
+/// </summary>
 public class CoinPickup : MonoBehaviour
 {
-    #region 可配置参数（拖入对应UI元素）
-    [Header("=== UI元素配置 ===")]
+    #region 可配置参数（保留原字段名，避免破坏 GameScene1 的序列化引用）
+    [Header("=== UI元素配置（可选，仅旧关卡胜利流程使用） ===")]
     [Tooltip("胜利提示文本（Victory，需放在结果面板内）")]
     public TextMeshProUGUI victoryText;
     [Tooltip("F键交互提示框（包含F文本的Image）")]
@@ -19,7 +25,7 @@ public class CoinPickup : MonoBehaviour
     [Tooltip("结果面板的Quit按钮")]
     public Button quitButton;
     [Tooltip("测试用红色UI面板（用于排查显示问题）")]
-    public GameObject testUI; // ✅ 修正：移到类内部
+    public GameObject testUI;
 
     [Header("=== 交互配置 ===")]
     [Tooltip("触发交互提示的距离阈值（单位：米）")]
@@ -28,6 +34,10 @@ public class CoinPickup : MonoBehaviour
     [Header("=== 玩家配置 ===")]
     [Tooltip("玩家标签（默认Player）")]
     public string playerTag = "Player";
+
+    [Header("=== 计分配置 ===")]
+    [Tooltip("本枚金币的价值（拾取后累加到 TotalCollected）")]
+    public int coinValue = 1;
     #endregion
 
     #region 私有变量
@@ -37,15 +47,26 @@ public class CoinPickup : MonoBehaviour
     private bool isCoinCollected;
     #endregion
 
+    /// <summary>本局（当前场景）累计拾取的金币数量，供 UI / 兑换系统读取。</summary>
+    public static int TotalCollected { get; private set; }
+
+    /// <summary>需要时（例如重新开始关卡）可手动清零。</summary>
+    public static void ResetTotal() => TotalCollected = 0;
+
+    static CoinPickup()
+    {
+        // 每次场景加载时把金币计数清零，保证是“本关”的统计
+        SceneManager.sceneLoaded += (scene, mode) => TotalCollected = 0;
+    }
+
     private void Awake()
     {
-        // 初始化所有UI为隐藏（包括测试UI）
+        // 初始化所有已配置的 UI 为隐藏（未配置为 null 的直接跳过）
         if (victoryText != null) victoryText.gameObject.SetActive(false);
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
         if (resultPanel != null) resultPanel.SetActive(false);
-        if (testUI != null) testUI.SetActive(false); // ✅ 新增：初始化测试UI
+        if (testUI != null) testUI.SetActive(false);
 
-        // 绑定按钮事件（加空值判断，避免空引用报错）
         if (continueButton != null)
             continueButton.onClick.AddListener(OnContinueButtonClick);
         if (quitButton != null)
@@ -54,27 +75,12 @@ public class CoinPickup : MonoBehaviour
 
     private void Start()
     {
-        // ✅ 新增调试日志：确认脚本启动
-        Debug.Log("=== CoinPickup脚本启动 ===");
-
-        // 查找玩家（加日志验证）
         GameObject player = GameObject.FindGameObjectWithTag(playerTag);
         if (player != null)
         {
             playerTransform = player.transform;
             bunnyController = player.GetComponent<BunnyController>();
-            Debug.Log("找到玩家对象：" + player.name);
         }
-        else
-        {
-            Debug.LogError("❌ 未找到标签为「" + playerTag + "」的玩家！请检查兔子标签。");
-        }
-
-        // ✅ 新增日志：验证UI引用是否为空
-        Debug.Log("interactTipPanel是否为空：" + (interactTipPanel == null));
-        Debug.Log("resultPanel是否为空：" + (resultPanel == null));
-        Debug.Log("testUI是否为空：" + (testUI == null));
-        Debug.Log("victoryText是否为空：" + (victoryText == null));
     }
 
     private void Update()
@@ -83,12 +89,8 @@ public class CoinPickup : MonoBehaviour
 
         CheckPlayerDistance();
 
-        // 按F拾取（加日志）
         if (isPlayerInRange && Input.GetKeyDown(KeyCode.F))
-        {
-            Debug.Log("✅ 按下F键，触发拾取硬币");
             CollectCoin();
-        }
     }
 
     #region 核心逻辑
@@ -96,16 +98,12 @@ public class CoinPickup : MonoBehaviour
     {
         if (playerTransform == null) return;
 
-        // 计算距离（加日志）
         float distance = Vector2.Distance(transform.position, playerTransform.position);
         isPlayerInRange = distance <= interactDistance;
-        Debug.Log($"玩家与硬币距离：{distance:F2} | 阈值：{interactDistance} | 是否在范围内：{isPlayerInRange}");
 
-        // 激活/隐藏F提示框
+        // 仅在配置了提示框的旧关卡里显示/隐藏 F 提示；Scene2 未配置则不会弹出任何 UI
         if (interactTipPanel != null)
             interactTipPanel.SetActive(isPlayerInRange);
-
-        // ✅ 新增：激活/隐藏测试UI（核心！）
         if (testUI != null)
             testUI.SetActive(isPlayerInRange);
     }
@@ -113,16 +111,23 @@ public class CoinPickup : MonoBehaviour
     private void CollectCoin()
     {
         isCoinCollected = true;
+
+        // 计入分数并从地图消失
+        TotalCollected += coinValue;
         Destroy(gameObject);
 
-        Time.timeScale = 0f;
-        if (bunnyController != null) bunnyController.enabled = false;
-
-        // 隐藏F提示框，强制显示测试UI和结果面板
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
-        if (testUI != null) testUI.SetActive(true); // ✅ 强制显示测试UI
-        if (resultPanel != null) resultPanel.SetActive(true);
-        if (victoryText != null) victoryText.gameObject.SetActive(true);
+        if (testUI != null) testUI.SetActive(false);
+
+        // 兼容旧关卡：只有当配置了胜利结果面板时，才执行胜利流程（冻结/禁用玩家/弹面板）
+        if (resultPanel != null)
+        {
+            Time.timeScale = 0f;
+            if (bunnyController != null) bunnyController.enabled = false;
+            if (testUI != null) testUI.SetActive(true);
+            resultPanel.SetActive(true);
+            if (victoryText != null) victoryText.gameObject.SetActive(true);
+        }
     }
 
     private void OnContinueButtonClick()
@@ -135,7 +140,7 @@ public class CoinPickup : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("❌ 场景「" + nextSceneName + "」未添加到Build Settings！");
+            Debug.LogWarning("❌ 场景「" + nextSceneName + "」未添加到 Build Settings！");
             Time.timeScale = 1f;
             if (bunnyController != null) bunnyController.enabled = true;
             if (resultPanel != null) resultPanel.SetActive(false);
@@ -156,7 +161,7 @@ public class CoinPickup : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.red;
+        Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, interactDistance);
     }
 }
