@@ -43,6 +43,7 @@ public class CoinPickup : MonoBehaviour
     #region 私有变量
     private Transform playerTransform;
     private BunnyController bunnyController;
+    private CoinPopOut coinPopOut;
     private bool isPlayerInRange;
     private bool isCoinCollected;
     #endregion
@@ -61,6 +62,8 @@ public class CoinPickup : MonoBehaviour
 
     private void Awake()
     {
+        coinPopOut = GetComponent<CoinPopOut>();
+
         // 初始化所有已配置的 UI 为隐藏（未配置为 null 的直接跳过）
         if (victoryText != null) victoryText.gameObject.SetActive(false);
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
@@ -112,9 +115,14 @@ public class CoinPickup : MonoBehaviour
     {
         isCoinCollected = true;
 
-        // 计入分数并从地图消失
+        // 计入分数
         TotalCollected += coinValue;
-        Destroy(gameObject);
+
+        // 蜂巢金币不能 Destroy：复活时要复位并重新弹出；普通金币维持原行为。
+        if (coinPopOut != null)
+            gameObject.SetActive(false);
+        else
+            Destroy(gameObject);
 
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
         if (testUI != null) testUI.SetActive(false);
@@ -128,6 +136,25 @@ public class CoinPickup : MonoBehaviour
             resultPanel.SetActive(true);
             if (victoryText != null) victoryText.gameObject.SetActive(true);
         }
+    }
+
+    /// <summary>蜂巢重置时调用：如果这枚金币已经被拾取，把它的分数退回。</summary>
+    public void RefundCollectedValue()
+    {
+        if (!isCoinCollected) return;
+
+        TotalCollected = Mathf.Max(0, TotalCollected - coinValue);
+        isCoinCollected = false;
+    }
+
+    /// <summary>蜂巢重置时调用：清空拾取状态和交互提示，让金币可以再次被拾取。</summary>
+    public void ResetPickupState()
+    {
+        isCoinCollected = false;
+        isPlayerInRange = false;
+
+        if (interactTipPanel != null) interactTipPanel.SetActive(false);
+        if (testUI != null) testUI.SetActive(false);
     }
 
     private void OnContinueButtonClick()

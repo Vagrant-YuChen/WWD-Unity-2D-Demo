@@ -54,6 +54,10 @@ public class FlagVictory : MonoBehaviour
     {
         won = true;
 
+        // 胜利后停止蜂群；即使没有配置胜利面板，也不让蜜蜂继续追。
+        BeeSwarmController beeSwarm = FindObjectOfType<BeeSwarmController>();
+        if (beeSwarm != null) beeSwarm.StopSwarm();
+
         // 未接入胜利面板时不冻结游戏，避免把玩家卡住；接入面板后自动变为正式结算
         if (resultPanel == null) return;
 
