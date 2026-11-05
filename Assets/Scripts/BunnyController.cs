@@ -16,6 +16,16 @@ public class BunnyController : MonoBehaviour
     [Tooltip("最大水平/垂直速度限制")]
     [SerializeField] protected Vector2 maxSpeed = new Vector2(8f, 15f);
 
+    [Header("=== 输入响应曲线 ===")]
+    [Tooltip("是否读取模拟量输入（手柄摇杆等）。关闭时使用 GetAxisRaw 的数字输入，键盘手感更干脆")]
+    [SerializeField] protected bool useAnalogInput = false;
+    [Tooltip("模拟量修正曲线（横轴 = 输入强度 0~1，纵轴 = 目标速度缩放）。把原始输入映射成更细腻的推杆力度；数字输入时通常保持线性即可")]
+    [SerializeField] protected AnimationCurve analogueModifier = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+    [Tooltip("响应时间曲线（横轴 = 同向按键持续秒数，纵轴 = 加速度系数 0~1）。起步时系数较小、长按后升到 1，避免瞬间满速，让起步有重量感")]
+    [SerializeField] protected AnimationCurve responseTimeModifier = new AnimationCurve(
+        new Keyframe(0f, 0.25f),
+        new Keyframe(0.6f, 1f));
+
     [Header("=== 大炮发射飞行配置 ===")]
     [Tooltip("发射飞行时使用的重力缩放（由大炮传入；决定抛物线弧度）")]
     [SerializeField] protected float launchGravityFallback = 1.2f;
@@ -23,14 +33,33 @@ public class BunnyController : MonoBehaviour
     [Header("=== 跳跃核心配置 ===")]
     [Tooltip("基础跳跃力度")]
     [SerializeField] protected float jumpForce = 7f;
+    [Tooltip("空跳次数：仅在「不是靠起跳进入空中」时可用（如走落/从高处坠落、掉下平台）。1 = 每次腾空可空跳一次。\n注意：从地面/Coyote 主动起跳会耗尽本次腾空的空跳预算，即「平地起跳后不能再空跳」。默认 1 启用该玩法")]
+    [SerializeField, Min(0)] protected int maxAirJumps = 1;
+    [Tooltip("空中跳跃冷却（秒）：一次空中跳后短时间内不再触发，避免同一次按键被重复判定为多次空中跳；0 = 不启用")]
+    [SerializeField, Min(0f)] protected float airJumpGraceTime = 0.05f;
     [Tooltip("Coyote Time：离地后仍可跳的时间")]
     [SerializeField] protected float jumpGraceTime = 0.1f;
     [Tooltip("Jump Buffer：按下后多久内落地仍可跳")]
     [SerializeField] protected float jumpBufferTime = 0.1f;
+    [Tooltip("可变跳跃高度：提前松开跳跃键时，上升速度乘以此系数（0~1，越小跳得越矮）")]
+    [SerializeField, Range(0.1f, 1f)] protected float variableJumpMultiplier = 0.5f;
     [Tooltip("地面重力缩放")]
     [SerializeField] protected float groundGravity = 1f;
-    [Tooltip("空中重力缩放（下落更快）")]
+    [Tooltip("空中重力缩放（旧版一刀切；仅当重力曲线未配置时的回退值）")]
     [SerializeField] protected float airGravity = 1.2f;
+
+    [Header("=== 跳跃弧度（重力顶点过渡）===")]
+    [Tooltip("起跳初期的低重力系数：上升阶段维持这个较轻的重力，让弧线更「软」更有滞空感（1 = 与全重力相同）")]
+    [SerializeField] protected float loGravityMod = 0.5f;
+    [Tooltip("上升速度低于此值时判定为接近顶点，退出低重力并开始向全重力过渡")]
+    [SerializeField] protected float gravityVelocityPeak = 1.5f;
+    [Tooltip("重力过渡时长曲线（横轴 = 起跳后时间，纵轴 = 过渡到全重力所需秒数）。越过顶点后 gravityTransitionTime 沿此曲线 MoveTowards，实现渐进加重")]
+    [SerializeField] protected AnimationCurve jumpCapTransitionTime = AnimationCurve.Constant(0f, 5f, 0.25f);
+    [Tooltip("全重力曲线（横轴 = 竖直速度 vy，纵轴 = 重力缩放）。下落越快越重、顶点附近较轻，塑造软起软落的手感")]
+    [SerializeField] protected AnimationCurve gravityCurve = new AnimationCurve(
+        new Keyframe(-16f, 2f),
+        new Keyframe(0f, 1.2f),
+        new Keyframe(16f, 1f));
 
     [Header("=== 检测配置 ===")]
     [Tooltip("地面检测中心点（绑定脚底空物体）")]
@@ -68,6 +97,22 @@ public class BunnyController : MonoBehaviour
     [Tooltip("落地动画保持时间（秒）")]
     [SerializeField] protected float landStateResetDelay = 0.15f;
 
+    [Header("=== 落地烟尘特效 ===")]
+    [Tooltip("落地烟尘预制体（可留空：留空时按下方控制器在运行时临时生成）")]
+    [SerializeField] protected GameObject landingDustPrefab;
+    [Tooltip("落地烟尘使用的动画控制器；一般指定 JumpSmoke.controller（预制体为空时使用）")]
+    [SerializeField] protected RuntimeAnimatorController landingDustController;
+    [Tooltip("下落速度绝对值超过此阈值才生成烟尘，避免小跳/走下缓坡也冒烟（正数，单位/秒）")]
+    [SerializeField, Min(0f)] protected float minSmokeVelocity = 2f;
+    [Tooltip("烟尘对象存活时间（秒），超时自动销毁")]
+    [SerializeField, Min(0.01f)] protected float landingDustLifetime = 0.5f;
+    [Tooltip("烟尘生成位置相对脚底的横向/纵向偏移")]
+    [SerializeField] protected Vector2 landingDustOffset = Vector2.zero;
+    [Tooltip("烟尘相对角色的缩放")]
+    [SerializeField, Min(0.01f)] protected float landingDustScale = 1f;
+    [Tooltip("烟尘在 SpriteRenderer 基础上叠加的渲染层级（越大越靠前）")]
+    [SerializeField] protected int landingDustSortingOrderOffset = 1;
+
     [Header("=== 调试 ===")]
     [SerializeField] protected bool debugLogs = false;
     #endregion
@@ -80,6 +125,8 @@ public class BunnyController : MonoBehaviour
     // 输入
     private float horizontalInput;
     private bool isSprinting;
+    private float horizontalInputHoldTime;
+    private int horizontalInputDirection;
 
     // 地面 / 计时器
     private bool isGrounded;
@@ -92,12 +139,31 @@ public class BunnyController : MonoBehaviour
     private bool launchActive;       // 大炮发射飞行中：不夹取速度、不做空中操控
     private bool windControlActive;  // 风扇上升中：水平操控交给 PropellerWind
     private float activeLaunchGravity = 1.2f; // 本次发射使用的重力缩放
+    private bool wasOnMovingPlatform;          // 上一物理帧是否站在运动平台(摩天轮)上
+    private Vector2 lastPlatformWorldPos;      // 上一物理帧所站平台的World位置(用于按位移携带)
     private bool launchAirborne;     // 发射后是否已经离地（用于准确判定落地瞬间）
     private bool risingFromJump;     // 真正的起跳/弹簧/发射造成上升中，此期间不能靠接触法线判着地
+
+    // 可变跳跃高度：每次起跳后只削减一次上升速度
+    private bool jumpCutApplied;
+    private bool jumpCutEligible;    // 仅玩家主动起跳的可变高度生效；弹簧/大炮/风力不削减
 
     // 跳跃阶段
     private int jumpState;   // 0=地面 1=上升 2=顶点 3=下落 4=即将落地
     private int lastJumpState;
+
+    // 二段跳 / 空中跳
+    private int airJumpsUsed;          // 本次腾空已消耗的空中跳次数
+    private float airJumpGraceTimer;   // 空中跳冷却计时（<=0 才允许下一次空中跳）
+
+    // 记录本段腾空期间达到的最大下落速度（负值），落地时据此判断是否触发烟尘
+    private float lastFallSpeed;
+
+    // 跳跃弧度（重力顶点过渡）
+    private float gravityTransitionTime; // 已过渡的重力时间（越接近目标越接近全重力）
+    private float timeSinceJump;         // 起跳后经过的时间
+    private bool loGravity;              // 上升低重力阶段
+    private bool inJumpArc;              // 本次腾空是否由跳跃/弹簧引起（走下平台不参与低重力过渡）
 
     // 死亡 / 复活
     public bool isDead;
@@ -184,8 +250,11 @@ public class BunnyController : MonoBehaviour
 
     protected virtual float LandStateResetDelay => landStateResetDelay;
 
-    /// <summary>触发"落地"所需的最低下落速度（负值，越小越难触发）。</summary>
+    /// <summary>触发落地动画所需的最低下落速度（负值）。</summary>
     protected virtual float LandedSpeedThreshold => LandedSpeedThresholdDefault;
+
+    /// <summary>落地烟尘特效的最小下落速度阈值（正数，单位/秒）。</summary>
+    protected virtual float MinSmokeVelocity => minSmokeVelocity;
 
     protected virtual float StepAssistHeight => stepAssistHeight;
     protected virtual float StepAssistLift => stepAssistLift;
@@ -214,14 +283,19 @@ public class BunnyController : MonoBehaviour
 
         UpdateInput();
         UpdateJumpBuffer();
+        if (airJumpGraceTimer > 0f)
+        {
+            airJumpGraceTimer = Mathf.Max(0f, airJumpGraceTimer - Time.deltaTime);
+        }
 
-        // 跳跃触发（Coyote + Buffer）
+        // 跳跃触发（Coyote + Buffer + 空中跳）
         if (jumpBufferTimer > 0f && CanJump())
         {
             Jump();
         }
 
         UpdateJumpState();
+        ApplyVariableJumpHeight();
         UpdateLandedState();
         UpdateAnimatorParams();
     }
@@ -234,14 +308,39 @@ public class BunnyController : MonoBehaviour
             return;
         }
 
+        // Record the strongest downward speed before ground detection changes the state.
+        lastFallSpeed = Mathf.Min(lastFallSpeed, rb.velocity.y);
         UpdateGroundDetection();
         UpdateCoyoteTimer();
 
         // 发射飞行中强制使用发射重力，保证一定是抛物线，且不受地面/空中状态影响
         if (launchActive)
+        {
             rb.gravityScale = activeLaunchGravity;
+        }
+        else if (windControlActive)
+        {
+            // 风扇上升保持原有行为
+            rb.gravityScale = airGravity;
+        }
+        else if (isGrounded)
+        {
+            rb.gravityScale = groundGravity;
+            timeSinceJump = 0f;
+            gravityTransitionTime = 0f;
+            inJumpArc = false;
+            loGravity = false;
+        }
         else
-            rb.gravityScale = isGrounded ? groundGravity : airGravity;
+        {
+            timeSinceJump += Time.fixedDeltaTime;
+            // 上升阶段维持低重力；越过顶点（vy 回落到阈值以下）后开始渐进加重
+            if (inJumpArc && loGravity && rb.velocity.y <= gravityVelocityPeak)
+            {
+                loGravity = false;
+            }
+            rb.gravityScale = ComputeAirGravityScale();
+        }
 
         MoveLogic();
         TryStepAssist();
@@ -261,7 +360,7 @@ public class BunnyController : MonoBehaviour
         }
 
         bool pushing = Mathf.Abs(horizontalInput) > 0.1f;
-        bool horizontallyBlocked = pushing && isGrounded && Mathf.Abs(rb.velocity.x) < 0.2f;
+        bool horizontallyBlocked = pushing && isGrounded && Mathf.Abs(rb.velocity.x - GetPlatformVelocity().x) < 0.2f;
 
         if (!horizontallyBlocked || stepCooldown > 0)
         {
@@ -284,7 +383,8 @@ public class BunnyController : MonoBehaviour
 
         // 抬脚：上移 + 给顶点一次越过的机会（用 rb.position 在物理步内移动更稳）
         rb.position = rb.position + Vector2.up * StepAssistLift;
-        rb.velocity = new Vector2(horizontalInput * Mathf.Max(0.5f, Mathf.Abs(rb.velocity.x)), rb.velocity.y);
+        Vector2 pv = GetPlatformVelocity();
+        rb.velocity = new Vector2(pv.x + horizontalInput * Mathf.Max(0.5f, Mathf.Abs(rb.velocity.x - pv.x)), rb.velocity.y);
         stepCooldown = StepAssistCooldownFrames;
         stepBlockedFrames = 0;
     }
@@ -343,8 +443,32 @@ public class BunnyController : MonoBehaviour
     #region 输入
     private void UpdateInput()
     {
-        horizontalInput = Input.GetAxisRaw("Horizontal");
+        // 数字输入用 GetAxisRaw 保持 -1/0/1 的干脆手感；模拟输入用 GetAxis 取带渐变的摇杆幅度
+        horizontalInput = useAnalogInput
+            ? Input.GetAxis("Horizontal")
+            : Input.GetAxisRaw("Horizontal");
+
         isSprinting = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        // 记录同向按住的持续时间（供 ResponseTimeModifier 做加速度渐进）。
+        // 与 Character.cs 的 left/rightResponseTime 行为一致：同向持续按住累加，
+        // 松开时保留已累积时长（快速点按不会每次都从零起步），换向时重新归零。
+        int dir = 0;
+        if (horizontalInput < -0.1f) dir = -1;
+        else if (horizontalInput > 0.1f) dir = 1;
+
+        if (dir != 0)
+        {
+            if (dir != horizontalInputDirection)
+            {
+                horizontalInputDirection = dir;
+                horizontalInputHoldTime = 0f;
+            }
+            else
+            {
+                horizontalInputHoldTime += Time.deltaTime;
+            }
+        }
     }
 
     private void UpdateJumpBuffer()
@@ -380,6 +504,9 @@ public class BunnyController : MonoBehaviour
 
         bool newGrounded = c || l || r || supportedByContact;
 
+        // 起跳上升阶段强制视为空中：避免屋顶等复杂碰撞体在起跳后仍被 OverlapCircle 误判为着地
+        if (risingFromJump && rb.velocity.y > jumpRiseSpeedThreshold) newGrounded = false;
+
         // 风道上升期间强制视为空中，避免站在风扇碰撞体上播放地面/落地动画
         if (windControlActive) newGrounded = false;
 
@@ -389,10 +516,28 @@ public class BunnyController : MonoBehaviour
         }
 
         // 仅在"上一帧空中 -> 本帧落地"瞬间置位，避免重复触发
-        if (newGrounded && !wasGroundedLastFrame && rb.velocity.y < LandedSpeedThreshold)
+        if (newGrounded && !wasGroundedLastFrame &&
+            (rb.velocity.y < LandedSpeedThreshold || lastFallSpeed < -MinSmokeVelocity))
         {
             isJustLanded = true;
             landTimer = LandStateResetDelay;
+            if (lastFallSpeed < -MinSmokeVelocity)
+            {
+                SpawnLandingDust(lastFallSpeed);
+            }
+            lastFallSpeed = 0f;
+        }
+
+        if (!newGrounded && wasGroundedLastFrame)
+        {
+            lastFallSpeed = 0f;
+        }
+
+        // 落地即补满空中跳次数，并清掉冷却，保证每次腾空都能重新使用
+        if (newGrounded)
+        {
+            airJumpsUsed = 0;
+            airJumpGraceTimer = 0f;
         }
 
         wasGroundedLastFrame = isGrounded;
@@ -450,23 +595,106 @@ public class BunnyController : MonoBehaviour
             return;
         }
 
-        float targetSpeed = horizontalInput * (isSprinting ? moveSpeed * sprintMultiplier : moveSpeed);
+        // 模拟量修正：把输入幅度 0~1 映射成速度缩放，支持手柄摇杆的细腻推杆
+        float inputMagnitude = Mathf.Clamp01(Mathf.Abs(horizontalInput));
+        float analogueScale = EvaluateCurve(analogueModifier, inputMagnitude, 1f);
+
+        // 响应时间修正：同向按住越久，加速度系数越接近 1；起步/换向时系数较低，避免瞬间满速
+        float responseFactor = EvaluateCurve(responseTimeModifier, horizontalInputHoldTime, 1f);
+
+        float baseSpeed = isSprinting ? moveSpeed * sprintMultiplier : moveSpeed;
+        float targetSpeed = horizontalInput * analogueScale * baseSpeed;
+
         float vx = rb.velocity.x;
 
         if (isGrounded)
         {
-            float speedDiff = targetSpeed - vx;
-            float moveForce = Mathf.Pow(Mathf.Abs(speedDiff) * groundFriction, 0.9f) * Mathf.Sign(speedDiff);
-            rb.AddForce(Vector2.right * moveForce, ForceMode2D.Force);
+            // 站在旋转的摩天轮平台上：直接按平台的世界位移把角色带走（水平+垂直），
+            // 角色与平台完全刚性同步。水平速度只由输入控制（相对平台），因此站着不动
+            // 不会因平台运动打滑，A/D 手感与平地一致，也不受平台惯性影响。
+            // 关键：不再用平台 Kinematic 刚体的 velocity（它被 transform 驱动，噪声极大，
+            // 正是"上下抖动/落地被踢飞"的根源），而是用干净的位移差来携带。
+            if (TryGetPlatformBody(out Rigidbody2D platformBody))
+            {
+                Vector2 platformPos = platformBody.position;
+
+                if (!wasOnMovingPlatform)
+                {
+                    // 首次踏上：只记录基准，不携带，避免落地瞬间瞬移
+                    lastPlatformWorldPos = platformPos;
+                }
+                else
+                {
+                    Vector2 carry = platformPos - lastPlatformWorldPos;
+                    rb.position = rb.position + carry;
+                    lastPlatformWorldPos = platformPos;
+                }
+                wasOnMovingPlatform = true;
+
+                // 相对垂直速度归零并临时关闭重力，避免物理积分把角色往下拽造成抖动；
+                // 垂直方向完全由上面的位移携带负责。
+                rb.gravityScale = 0f;
+                rb.velocity = new Vector2(rb.velocity.x, 0f);
+
+                // 水平：摩擦力作用于相对速度（相对平台），目标是纯输入速度
+                float speedDiff = targetSpeed - rb.velocity.x;
+                float moveForce = Mathf.Pow(Mathf.Abs(speedDiff) * groundFriction, 0.9f) * Mathf.Sign(speedDiff) * responseFactor;
+                rb.AddForce(Vector2.right * moveForce, ForceMode2D.Force);
+            }
+            else
+            {
+                wasOnMovingPlatform = false;
+                float speedDiff = targetSpeed - vx;
+                float moveForce = Mathf.Pow(Mathf.Abs(speedDiff) * groundFriction, 0.9f) * Mathf.Sign(speedDiff) * responseFactor;
+                rb.AddForce(Vector2.right * moveForce, ForceMode2D.Force);
+            }
         }
         else
         {
+            wasOnMovingPlatform = false;
             float airControl = airInertia * (isSprinting ? 1.2f : 1f);
-            float airSpeedDiff = (targetSpeed - vx) * airControl;
+            float airSpeedDiff = (targetSpeed - vx) * airControl * responseFactor;
             rb.velocity = new Vector2(vx + airSpeedDiff * Time.fixedDeltaTime, rb.velocity.y);
         }
 
         ApplyFacing();
+    }
+
+    /// <summary>
+    /// 安全地求值一条曲线；曲线未配置（null 或空）时返回 fallback。
+    /// </summary>
+    private static float EvaluateCurve(AnimationCurve curve, float time, float fallback)
+    {
+        return (curve != null && curve.length > 0) ? curve.Evaluate(time) : fallback;
+    }
+
+    private static readonly Collider2D[] platformProbeHits = new Collider2D[16];
+
+    private bool TryGetPlatformBody(out Rigidbody2D platformBody)
+    {
+        platformBody = null;
+        if (!isGrounded) return false;
+
+        Vector3[] probes = { GroundCheckCenterPosition, GroundCheckLeftPosition, GroundCheckRightPosition };
+        for (int p = 0; p < probes.Length; p++)
+        {
+            int count = Physics2D.OverlapCircleNonAlloc(
+                probes[p], GroundCheckRadius, platformProbeHits, Physics2D.AllLayers);
+            for (int i = 0; i < count; i++)
+            {
+                Collider2D col = platformProbeHits[i];
+                Rigidbody2D body = col != null ? col.attachedRigidbody : null;
+                if (body == null || body == rb || body.bodyType != RigidbodyType2D.Kinematic) continue;
+                platformBody = body;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected Vector2 GetPlatformVelocity()
+    {
+        return TryGetPlatformBody(out Rigidbody2D body) ? body.velocity : Vector2.zero;
     }
 
     private void ApplyFacing()
@@ -531,8 +759,65 @@ public class BunnyController : MonoBehaviour
     #endregion
 
     #region 跳跃
+    /// <summary>
+    /// 根据「重力顶点过渡曲线」计算空中重力缩放：
+    /// 起跳初期维持 loGravityMod 的低重力，越过顶点后 gravityTransitionTime 沿
+    /// jumpCapTransitionTime 曲线 MoveTowards，使重力从低重力渐进过渡到 gravityCurve 的全重力。
+    /// 走下平台等非跳跃腾空直接使用全重力，避免无谓的滞空。
+    /// </summary>
+    private float ComputeAirGravityScale()
+    {
+        // 曲线未配置时回退到旧的固定空中重力
+        if (gravityCurve == null || gravityCurve.length == 0 ||
+            jumpCapTransitionTime == null || jumpCapTransitionTime.length == 0)
+        {
+            return airGravity;
+        }
+
+        float vy = rb.velocity.y;
+        float fullGravity = gravityCurve.Evaluate(vy);
+
+        // 非跳跃腾空（走下平台等）：不做低重力过渡，直接全重力
+        if (!inJumpArc)
+        {
+            return fullGravity;
+        }
+
+        // 过渡目标时长取正，避免除零
+        float capTransition = Mathf.Max(jumpCapTransitionTime.Evaluate(timeSinceJump), 0.0001f);
+
+        if (loGravity)
+        {
+            // 上升低重力阶段：保持过渡进度为 0（重力停留在 loGravityMod）
+            gravityTransitionTime = 0f;
+        }
+        else
+        {
+            gravityTransitionTime = Mathf.MoveTowards(gravityTransitionTime, capTransition, Time.fixedDeltaTime);
+        }
+
+        float ratio = Mathf.Clamp01(gravityTransitionTime / capTransition);
+        return Mathf.Lerp(loGravityMod, fullGravity, ratio);
+    }
+
     private void Jump()
     {
+        // 判定本次是否为空跳：地面/Coyote 起跳时 coyoteTimer > 0；
+        // coyote 用尽且已离地，才是空跳（此时不消耗也不重置预算，airJumpsUsed 仍是 0）
+        bool isAirJump = coyoteTimer <= 0f;
+        if (isAirJump)
+        {
+            airJumpsUsed++;
+            airJumpGraceTimer = airJumpGraceTime;
+        }
+        else
+        {
+            // 从地面 / Coyote 主动起跳：耗尽本次腾空的空跳预算，
+            // 从而取消「平地起跳后还能在空中再跳」的情况
+            airJumpsUsed = maxAirJumps;
+            airJumpGraceTimer = airJumpGraceTime;
+        }
+
         rb.velocity = new Vector2(rb.velocity.x, 0f);
         rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
 
@@ -543,15 +828,59 @@ public class BunnyController : MonoBehaviour
         coyoteTimer = 0f;
         jumpBufferTimer = 0f;
         springBounceActive = false;
+        isGrounded = false;
+        wasGroundedLastFrame = false;
         risingFromJump = true;
+        jumpCutApplied = false;
+        jumpCutEligible = true;
+        lastFallSpeed = 0f;
 
-        if (debugLogs) Debug.Log($"[{name}] Jump | vy={rb.velocity.y}");
+        // 重置跳跃弧度：从低重力起步，越过顶点后沿曲线过渡到全重力
+        timeSinceJump = 0f;
+        gravityTransitionTime = 0f;
+        loGravity = true;
+        inJumpArc = true;
+
+        if (debugLogs) Debug.Log($"[{name}] Jump | air={isAirJump} used={airJumpsUsed}/{maxAirJumps} vy={rb.velocity.y}");
     }
 
     private bool CanJump()
     {
-        // coyote time 真正生效：离地短时间仍可跳；风力上升期间禁用跳跃
-        return coyoteTimer > 0f && !isDead && !windControlActive;
+        if (isDead || windControlActive) return false;
+
+        // 地面 / Coyote 起跳优先：留在地上的宽限时间内视为普通起跳
+        if (coyoteTimer > 0f) return true;
+
+        // 空跳：仅当本次腾空「不是靠平地/Coyote 起跳进入」时可用（预算未被起跳耗尽），
+        // 例如走落平台、从高处坠落；不限制离地时间，可随时使用一次
+        if (launchActive) return false;
+        return !isGrounded
+            && airJumpsUsed < maxAirJumps
+            && airJumpGraceTimer <= 0f;
+    }
+
+    /// <summary>
+    /// 可变跳跃高度（Jump Cut）：
+    /// 起跳后若玩家提前松开跳跃键，且角色仍在上升，则把上升速度削减一次，
+    /// 让玩家能通过按键时长控制跳跃高度。只在每次起跳后执行一次，避免每帧递减。
+    /// </summary>
+    private void ApplyVariableJumpHeight()
+    {
+        if (isDead || windControlActive || launchActive) return;
+        if (!jumpCutEligible) return;
+
+        // 仍在上升时才削减；落地/下落阶段不动
+        if (rb.velocity.y <= 0f) return;
+        if (jumpCutApplied) return;
+
+        // 跳跃键仍按住：允许完整高度
+        if (Input.GetKey(KeyCode.Space)) return;
+
+        jumpCutApplied = true;
+        float newVy = rb.velocity.y * variableJumpMultiplier;
+        rb.velocity = new Vector2(rb.velocity.x, newVy);
+
+        if (debugLogs) Debug.Log($"[{name}] JumpCut | vy -> {newVy:F2}");
     }
 
     private void UpdateJumpState()
@@ -565,7 +894,7 @@ public class BunnyController : MonoBehaviour
         {
             candidate = 0;
         }
-        else if (vy > jumpRiseSpeedThreshold)
+        else if (risingFromJump && vy > jumpRiseSpeedThreshold)
         {
             candidate = 1; // 上升：必须是真的跳起来（跳跃/弹簧/大炮），斜坡贴地回弹的速度达不到这个值
         }
@@ -605,6 +934,33 @@ public class BunnyController : MonoBehaviour
         }
 
         jumpState = candidate;
+    }
+
+    private void SpawnLandingDust(float fallSpeed)
+    {
+        if (fallSpeed >= -minSmokeVelocity) return;
+
+        Vector3 spawnPosition = GroundCheckCenterPosition + (Vector3)landingDustOffset;
+        GameObject dust;
+        if (landingDustPrefab != null)
+        {
+            dust = Instantiate(landingDustPrefab, spawnPosition, Quaternion.identity);
+        }
+        else
+        {
+            if (landingDustController == null) return;
+
+            dust = new GameObject("LandingDust");
+            dust.transform.position = spawnPosition;
+            SpriteRenderer dustRenderer = dust.AddComponent<SpriteRenderer>();
+            Animator dustAnimator = dust.AddComponent<Animator>();
+            dustAnimator.runtimeAnimatorController = landingDustController;
+            dustRenderer.sortingLayerID = spriteRenderer != null ? spriteRenderer.sortingLayerID : 0;
+            dustRenderer.sortingOrder = (spriteRenderer != null ? spriteRenderer.sortingOrder : 0) + landingDustSortingOrderOffset;
+        }
+
+        dust.transform.localScale = Vector3.one * landingDustScale;
+        Destroy(dust, landingDustLifetime);
     }
 
     private void UpdateLandedState()
@@ -667,6 +1023,8 @@ public class BunnyController : MonoBehaviour
             jumpState = 0;
             lastJumpState = 0;
             horizontalInput = 0f;
+            horizontalInputHoldTime = 0f;
+            horizontalInputDirection = 0;
             isSprinting = false;
             springBounceActive = false;
             launchActive = false;
@@ -674,6 +1032,17 @@ public class BunnyController : MonoBehaviour
             windControlActive = false;
             activeLaunchGravity = launchGravityFallback;
             risingFromJump = false;
+            jumpCutApplied = false;
+            jumpCutEligible = false;
+            lastFallSpeed = 0f;
+            airJumpsUsed = 0;
+            airJumpGraceTimer = 0f;
+
+            // 重置跳跃弧度状态
+            timeSinceJump = 0f;
+            gravityTransitionTime = 0f;
+            loGravity = false;
+            inJumpArc = false;
 
             if (anim != null)
             {
@@ -725,6 +1094,17 @@ public class BunnyController : MonoBehaviour
         lastJumpState = 1;
         springBounceActive = true;
         risingFromJump = true;
+        jumpCutApplied = false;
+        lastFallSpeed = 0f;
+        jumpCutEligible = false;
+        airJumpsUsed = 0;
+        airJumpGraceTimer = 0f;
+
+        // 弹簧同样使用低重力起跳弧度
+        timeSinceJump = 0f;
+        gravityTransitionTime = 0f;
+        loGravity = true;
+        inJumpArc = true;
 
         rb.velocity = new Vector2(rb.velocity.x, upwardSpeed);
     }
@@ -750,9 +1130,20 @@ public class BunnyController : MonoBehaviour
         springBounceActive = true;
         launchActive = true;
         launchAirborne = false;
+        lastFallSpeed = 0f;
         risingFromJump = true;
+        jumpCutApplied = false;
+        jumpCutEligible = false;
+        airJumpsUsed = 0;
+        airJumpGraceTimer = 0f;
 
         activeLaunchGravity = gravityScale > 0f ? gravityScale : launchGravityFallback;
+
+        // 发射使用固定重力，退出跳跃弧度过渡
+        timeSinceJump = 0f;
+        gravityTransitionTime = 0f;
+        loGravity = false;
+        inJumpArc = false;
 
         // 确保刚体处于可受力的动态状态，再给速度
         rb.isKinematic = false;
@@ -791,6 +1182,15 @@ public class BunnyController : MonoBehaviour
         launchAirborne = false;
         activeLaunchGravity = launchGravityFallback;
         risingFromJump = true;
+        jumpCutApplied = false;
+        jumpCutEligible = false;
+        airJumpsUsed = 0;
+        airJumpGraceTimer = 0f;
+        lastFallSpeed = 0f;
+        timeSinceJump = 0f;
+        gravityTransitionTime = 0f;
+        loGravity = false;
+        inJumpArc = false;
 
         if (rb != null)
         {
