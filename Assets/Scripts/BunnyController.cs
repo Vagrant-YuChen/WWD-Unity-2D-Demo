@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 [RequireComponent(typeof(Rigidbody2D), typeof(Animator))]
 public class BunnyController : MonoBehaviour
@@ -9,6 +10,13 @@ public class BunnyController : MonoBehaviour
     [SerializeField] protected float moveSpeed = 5f;
     [Tooltip("冲刺速度倍率")]
     [SerializeField] protected float sprintMultiplier = 1.8f;
+
+    [Header("=== 冲刺(Shift 加速)场景限制 ===")]
+    [Tooltip("允许 Shift 冲刺的场景名列表（区分大小写不敏感）。只有当前场景在此列表中才可冲刺；" +
+             "例如默认只在第二关 GameScene2 可用，第一关 GameScene1 不在列表中，因此不能加速。留空则所有场景都可用。")]
+    [SerializeField] protected string[] sprintEnabledScenes = { "GameScene2" };
+    // 当前场景是否允许冲刺，Awake 时根据场景名计算一次
+    private bool sprintAllowedInScene = true;
     [Tooltip("地面摩擦力（越大停得越快）")]
     [SerializeField] protected float groundFriction = 20f;
     [Tooltip("空中惯性（0=无惯性，1=自然）")]
@@ -141,6 +149,13 @@ public class BunnyController : MonoBehaviour
     private float activeLaunchGravity = 1.2f; // 本次发射使用的重力缩放
     private bool wasOnMovingPlatform;          // 上一物理帧是否站在运动平台(摩天轮)上
     private Vector2 lastPlatformWorldPos;      // 上一物理帧所站平台的World位置(用于按位移携带)
+    private Rigidbody2D standingPlatformBody;   // 当前脚底所踩的 Kinematic 运动平台刚体
+    private Collider2D standingPlatformCollider; // 该平台的碰撞体(用于水平范围/顶面判断)
+    private float feetLocalOffsetY;             // 脚底(碰撞体下沿)相对刚体中心的Y偏移(负值，Awake缓存)
+    // 骑乘状态用“小范围邻近”来保持（桥接平台下降时接触丢失的那一两帧），
+    // 但首次站上去必须靠真实接触——因此不会像几何吸附那样在空中被"吸"到平台、也不会产生悬空。
+    private const float platformRideGapDown = 0.25f; // 继续骑乘时允许的最大穿透
+    private const float platformRideGapUp = 0.20f;   // 继续骑乘时允许的最大离缝(应对帧率抖动/瞬间接触丢失)
     private bool launchAirborne;     // 发射后是否已经离地（用于准确判定落地瞬间）
     private bool risingFromJump;     // 真正的起跳/弹簧/发射造成上升中，此期间不能靠接触法线判着地
 
@@ -212,6 +227,9 @@ public class BunnyController : MonoBehaviour
         {
             var noFriction = new PhysicsMaterial2D("BunnyNoFriction") { friction = 0f, bounciness = 0f };
             bodyCollider.sharedMaterial = noFriction;
+
+            // 缓存脚底相对刚体中心的偏移（碰撞体不旋转，恒定），用于吸附到平台顶面
+            feetLocalOffsetY = bodyCollider.bounds.min.y - transform.position.y;
         }
 
         rb.gravityScale = groundGravity;
@@ -225,7 +243,26 @@ public class BunnyController : MonoBehaviour
         isDead = false;
         isRespawning = false;
 
+        sprintAllowedInScene = ResolveSprintAllowedInScene();
+
         OnCharacterConfigured();
+    }
+
+    /// <summary>
+    /// 根据当前场景名判断是否允许 Shift 冲刺。
+    /// 列表为空时视为全部场景可用（保持旧行为）；否则仅当场景名在列表内才允许。
+    /// </summary>
+    private bool ResolveSprintAllowedInScene()
+    {
+        if (sprintEnabledScenes == null || sprintEnabledScenes.Length == 0) return true;
+
+        string current = SceneManager.GetActiveScene().name;
+        for (int i = 0; i < sprintEnabledScenes.Length; i++)
+        {
+            if (string.Equals(sprintEnabledScenes[i], current, System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     #region 子类扩展点（供 SheepController 等做模型适配）
@@ -448,7 +485,9 @@ public class BunnyController : MonoBehaviour
             ? Input.GetAxis("Horizontal")
             : Input.GetAxisRaw("Horizontal");
 
-        isSprinting = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        // 仅当当前场景允许冲刺时才响应 Shift，第一关（GameScene1）无法加速
+        isSprinting = sprintAllowedInScene
+            && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
 
         // 记录同向按住的持续时间（供 ResponseTimeModifier 做加速度渐进）。
         // 与 Character.cs 的 left/rightResponseTime 行为一致：同向持续按住累加，
@@ -502,7 +541,29 @@ public class BunnyController : MonoBehaviour
             && !risingFromRealJump
             && HasUpwardSupport();
 
-        bool newGrounded = c || l || r || supportedByContact;
+        bool contactGrounded = c || l || r || supportedByContact;
+
+        // 找出脚底附近/正下方的运动平台，用于判断是否仍在骑乘。
+        Rigidbody2D platBody = null;
+        Collider2D platCol = null;
+        bool platformNearby = !windControlActive && !risingFromRealJump
+            && TryGetStandingPlatform(out platBody, out platCol);
+
+        // 骑乘判定：
+        //  - 首次踏上必须靠真实接触（落到平台上）才吸附，避免在空中被几何"吸"上去；
+        //  - 已在平台上时，只要平台仍在很小范围内邻近（桥接平台下降时接触丢掉的瞬间）就保持骑乘，
+        //    这样按位移携带不会掉帧，也就不会出现"静止却滑动/上下抖动"。
+        bool ridingPlatform = false;
+        if (platformNearby)
+        {
+            if (wasOnMovingPlatform) ridingPlatform = true;
+            else if (contactGrounded) ridingPlatform = true;
+        }
+
+        standingPlatformBody = ridingPlatform ? platBody : null;
+        standingPlatformCollider = ridingPlatform ? platCol : null;
+
+        bool newGrounded = contactGrounded || ridingPlatform;
 
         // 起跳上升阶段强制视为空中：避免屋顶等复杂碰撞体在起跳后仍被 OverlapCircle 误判为着地
         if (risingFromJump && rb.velocity.y > jumpRiseSpeedThreshold) newGrounded = false;
@@ -609,15 +670,13 @@ public class BunnyController : MonoBehaviour
 
         if (isGrounded)
         {
-            // 站在旋转的摩天轮平台上：直接按平台的世界位移把角色带走（水平+垂直），
-            // 角色与平台完全刚性同步。水平速度只由输入控制（相对平台），因此站着不动
-            // 不会因平台运动打滑，A/D 手感与平地一致，也不受平台惯性影响。
-            // 关键：不再用平台 Kinematic 刚体的 velocity（它被 transform 驱动，噪声极大，
-            // 正是"上下抖动/落地被踢飞"的根源），而是用干净的位移差来携带。
-            if (TryGetPlatformBody(out Rigidbody2D platformBody))
+            // 站在旋转的摩天轮平台上：按平台的世界位移把角色带走（水平+垂直），与平台同步平移。
+            // 用干净的位移差 carrying（而不是 Kinematic 刚体的 velocity，它被 transform 驱动噪声大），
+            // 并且 carrying 每一物理帧都执行——由 UpdateGroundDetection 的骑乘锁存保证不会被接触闪烁打断。
+            // 不做任何"吸附/压入平台"，避免宽于平台的兔子与平台边角互相挤压而被横推。
+            if (standingPlatformBody != null && standingPlatformCollider != null && standingPlatformCollider.enabled)
             {
-                Vector2 platformPos = platformBody.position;
-
+                Vector2 platformPos = standingPlatformBody.position;
                 if (!wasOnMovingPlatform)
                 {
                     // 首次踏上：只记录基准，不携带，避免落地瞬间瞬移
@@ -625,14 +684,12 @@ public class BunnyController : MonoBehaviour
                 }
                 else
                 {
-                    Vector2 carry = platformPos - lastPlatformWorldPos;
-                    rb.position = rb.position + carry;
-                    lastPlatformWorldPos = platformPos;
+                    rb.position = rb.position + (platformPos - lastPlatformWorldPos);
                 }
+                lastPlatformWorldPos = platformPos;
                 wasOnMovingPlatform = true;
 
-                // 相对垂直速度归零并临时关闭重力，避免物理积分把角色往下拽造成抖动；
-                // 垂直方向完全由上面的位移携带负责。
+                // 关闭重力并清零竖直速度：垂直方向跟随完全由上面的位移携带负责，避免物理积分抖动。
                 rb.gravityScale = 0f;
                 rb.velocity = new Vector2(rb.velocity.x, 0f);
 
@@ -669,6 +726,56 @@ public class BunnyController : MonoBehaviour
     }
 
     private static readonly Collider2D[] platformProbeHits = new Collider2D[16];
+
+    /// <summary>
+    /// 几何判定：角色脚底附近是否存在被脚本驱动的 Kinematic 平台，且角色水平范围仍在其上。
+    /// 与瞬时物理接触解耦（平台下降时接触会短暂缺失），仅用于“是否仍在骑乘”的邻近判断；
+    /// 首次踏上仍需真实接触（由调用方把关），避免在空中被几何吸附。
+    /// </summary>
+    private bool TryGetStandingPlatform(out Rigidbody2D platformBody, out Collider2D platformCol)
+    {
+        platformBody = null;
+        platformCol = null;
+        if (bodyCollider == null) return false;
+
+        float feetY = rb.position.y + feetLocalOffsetY;
+        float centerX = rb.position.x;
+
+        int count = Physics2D.OverlapCircleNonAlloc(
+            new Vector2(centerX, feetY + GroundCheckRadius * 0.5f),
+            GroundCheckRadius * 3f,
+            platformProbeHits,
+            Physics2D.AllLayers);
+
+        float bestScore = float.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            Collider2D col = platformProbeHits[i];
+            if (col == null) continue;
+            Rigidbody2D body = col.attachedRigidbody;
+            if (body == null || body == rb || body.bodyType != RigidbodyType2D.Kinematic) continue;
+
+            Bounds cb = col.bounds;
+            float topY = body.position.y + cb.extents.y;
+            float dY = feetY - topY;
+
+            // 必须踩在顶面之上：允许少量穿透，也允许接触瞬间丢失造成的一小段离缝。
+            if (dY < -platformRideGapDown || dY > platformRideGapUp) continue;
+            // 角色中心仍需落在平台水平范围内（含少量边距），走出边缘后自然掉落。
+            float halfW = cb.extents.x;
+            if (centerX < body.position.x - halfW - 0.15f || centerX > body.position.x + halfW + 0.15f) continue;
+
+            float score = Mathf.Abs(dY);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                platformBody = body;
+                platformCol = col;
+            }
+        }
+
+        return platformBody != null;
+    }
 
     private bool TryGetPlatformBody(out Rigidbody2D platformBody)
     {
@@ -952,11 +1059,18 @@ public class BunnyController : MonoBehaviour
 
             dust = new GameObject("LandingDust");
             dust.transform.position = spawnPosition;
-            SpriteRenderer dustRenderer = dust.AddComponent<SpriteRenderer>();
+            dust.AddComponent<SpriteRenderer>();
             Animator dustAnimator = dust.AddComponent<Animator>();
             dustAnimator.runtimeAnimatorController = landingDustController;
-            dustRenderer.sortingLayerID = spriteRenderer != null ? spriteRenderer.sortingLayerID : 0;
-            dustRenderer.sortingOrder = (spriteRenderer != null ? spriteRenderer.sortingOrder : 0) + landingDustSortingOrderOffset;
+        }
+
+        // 无论走预制体还是运行时生成，都把烟尘对齐到角色所在的排序层并叠加层级偏移，
+        // 避免预制体自带的 Default 排序层（order 0）被场景地面/前景（order >= 1）盖住。
+        SpriteRenderer dustSprite = dust.GetComponentInChildren<SpriteRenderer>(true);
+        if (dustSprite != null)
+        {
+            dustSprite.sortingLayerID = spriteRenderer != null ? spriteRenderer.sortingLayerID : 0;
+            dustSprite.sortingOrder = (spriteRenderer != null ? spriteRenderer.sortingOrder : 0) + landingDustSortingOrderOffset;
         }
 
         dust.transform.localScale = Vector3.one * landingDustScale;

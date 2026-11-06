@@ -1114,7 +1114,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6171767664915276156, guid: 5fd6938b9186080458bc567e8edbf769, type: 3}
       propertyPath: landingDustScale
-      value: 0.4
+      value: 0.3
       objectReference: {fileID: 0}
     - target: {fileID: 6171767664915276156, guid: 5fd6938b9186080458bc567e8edbf769, type: 3}
       propertyPath: sprintMultiplier

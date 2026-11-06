@@ -2851,7 +2851,7 @@ MonoBehaviour:
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0.25
+      value: 0.4
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -2859,7 +2859,7 @@ MonoBehaviour:
       inWeight: 0
       outWeight: 0
     - serializedVersion: 3
-      time: 0.6
+      time: 0.5
       value: 1
       inSlope: 0
       outSlope: 0
@@ -2876,17 +2876,17 @@ MonoBehaviour:
   airJumpGraceTime: 0.05
   jumpGraceTime: 0.1
   jumpBufferTime: 0.1
-  variableJumpMultiplier: 0.5
+  variableJumpMultiplier: 0.75
   groundGravity: 1
   airGravity: 1.2
-  loGravityMod: 0.5
-  gravityVelocityPeak: 1.5
+  loGravityMod: 0.9
+  gravityVelocityPeak: 2
   jumpCapTransitionTime:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0.25
+      value: 0.34985772
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -2894,8 +2894,8 @@ MonoBehaviour:
       inWeight: 0
       outWeight: 0
     - serializedVersion: 3
-      time: 5
-      value: 0.25
+      time: 4.999999
+      value: 0.34999683
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -2909,31 +2909,31 @@ MonoBehaviour:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
-      time: -16
-      value: 2
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
+      time: -15
+      value: 3
+      inSlope: -0.1
+      outSlope: -0.1
+      tangentMode: 34
       weightedMode: 0
       inWeight: 0
-      outWeight: 0
+      outWeight: 0.33333334
     - serializedVersion: 3
       time: 0
-      value: 1.2
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
+      value: 1.5
+      inSlope: -0.06666667
+      outSlope: -0.06666667
+      tangentMode: 34
       weightedMode: 0
-      inWeight: 0
-      outWeight: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
     - serializedVersion: 3
-      time: 16
+      time: 15
       value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
+      inSlope: -0.033333335
+      outSlope: -0.033333335
+      tangentMode: 34
       weightedMode: 0
-      inWeight: 0
+      inWeight: 0.33333334
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -2954,12 +2954,12 @@ MonoBehaviour:
   jumpDownThreshold: -0.01
   jumpRiseSpeedThreshold: 1
   landStateResetDelay: 0.15
-  landingDustPrefab: {fileID: 0}
+  landingDustPrefab: {fileID: 9000000000000000001, guid: 7f3b1c2d4e5a69788b9c0d1e2f3a4b5c, type: 3}
   landingDustController: {fileID: 0}
   minSmokeVelocity: 2
-  landingDustLifetime: 0.5
+  landingDustLifetime: 0.4
   landingDustOffset: {x: 0, y: 0}
-  landingDustScale: 1
+  landingDustScale: 0.15
   landingDustSortingOrderOffset: 1
   debugLogs: 0
   isDead: 0
@@ -5929,7 +5929,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 4
+  m_SortingOrder: 5
   m_Sprite: {fileID: 21300000, guid: c6430613f90690c4899720f408ef2f31, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -8170,7 +8170,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 3
+  m_SortingOrder: 4
   m_Sprite: {fileID: 21300000, guid: 8de27cd8ca9050543b2914fb5b630f23, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

@@ -62,6 +62,7 @@ public class CollapsingBlockTrap : MonoBehaviour
     private BoxCollider2D box;
     private bool activated;          // 已经从踩踏触发、正在走流程（含动画与停顿）
     private Coroutine routine;
+    private static readonly Collider2D[] footProbeHits = new Collider2D[8];
     #endregion
 
     #region 生命周期
@@ -86,6 +87,37 @@ public class CollapsingBlockTrap : MonoBehaviour
     #region 踩踏检测
     private void OnCollisionEnter2D(Collision2D collision) => TryStart(collision);
     private void OnCollisionStay2D(Collision2D collision) => TryStart(collision);
+
+    /// <summary>
+    /// 兜底触发：物理接触回调在高速/移动平台上偶发缺失时，只要兔子确实站在顶面
+    /// （脚底探测 + 已着地 + 脚底高度不低于顶面），也判定为踩踏，保证玩法稳定触发。
+    /// </summary>
+    private void Update()
+    {
+        if (activated || box == null || !box.enabled) return;
+
+        Bounds bb = box.bounds;
+        Vector2 probeCenter = new Vector2(bb.center.x, bb.max.y + 0.06f);
+        Vector2 probeSize = new Vector2(Mathf.Max(0.02f, bb.size.x * 0.95f), 0.30f);
+
+        int count = Physics2D.OverlapBoxNonAlloc(probeCenter, probeSize, 0f, footProbeHits);
+        for (int i = 0; i < count; i++)
+        {
+            Collider2D hit = footProbeHits[i];
+            if (hit == null) continue;
+
+            BunnyController bunny = BunnyContactUtility.FindBunny(hit);
+            if (bunny == null || bunny.isDead) continue;
+            if (!bunny.IsGroundedState) continue;      // 必须是真正站在上面，而非从上方掠过
+            if (!IsBunnyOnTop(hit)) continue;
+
+            activated = true;
+            if (routine != null) StopCoroutine(routine);
+            routine = StartCoroutine(CollapseSequence());
+            if (debugLogs) Debug.Log($"[{name}] 脚底探测触发碎裂。");
+            return;
+        }
+    }
 
     private void TryStart(Collision2D collision)
     {
