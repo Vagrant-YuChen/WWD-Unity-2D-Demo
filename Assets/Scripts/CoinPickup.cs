@@ -46,6 +46,9 @@ public class CoinPickup : MonoBehaviour
     private CoinPopOut coinPopOut;
     private bool isPlayerInRange;
     private bool isCoinCollected;
+    private bool wasPlayerDead;
+    private SpriteRenderer spriteRenderer;
+    private Collider2D bodyCollider;
     #endregion
 
     /// <summary>本局（当前场景）累计拾取的金币数量，供 UI / 兑换系统读取。</summary>
@@ -63,6 +66,8 @@ public class CoinPickup : MonoBehaviour
     private void Awake()
     {
         coinPopOut = GetComponent<CoinPopOut>();
+        spriteRenderer = GetComponent<SpriteRenderer>();
+        bodyCollider = GetComponent<Collider2D>();
 
         // 初始化所有已配置的 UI 为隐藏（未配置为 null 的直接跳过）
         if (victoryText != null) victoryText.gameObject.SetActive(false);
@@ -83,12 +88,19 @@ public class CoinPickup : MonoBehaviour
         {
             playerTransform = player.transform;
             bunnyController = player.GetComponent<BunnyController>();
+            wasPlayerDead = bunnyController != null && bunnyController.isDead;
         }
     }
 
     private void Update()
     {
-        if (isCoinCollected) return;
+        if (isCoinCollected)
+        {
+            // 已拾取的普通金币（无 CoinPopOut）在死亡复活时要重新出现，除非已经胜利。
+            if (coinPopOut == null)
+                CheckRespawnReset();
+            return;
+        }
 
         CheckPlayerDistance();
 
@@ -115,6 +127,8 @@ public class CoinPickup : MonoBehaviour
     {
         isCoinCollected = true;
 
+        wasPlayerDead = bunnyController != null && bunnyController.isDead;
+
         // 计入分数
         TotalCollected += coinValue;
 
@@ -122,7 +136,11 @@ public class CoinPickup : MonoBehaviour
         if (coinPopOut != null)
             gameObject.SetActive(false);
         else
-            Destroy(gameObject);
+        {
+            // Scene2 的普通金币不销毁，而是隐藏，等待玩家死亡后重新出现（胜利除外）。
+            if (spriteRenderer != null) spriteRenderer.enabled = false;
+            if (bodyCollider != null) bodyCollider.enabled = false;
+        }
 
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
         if (testUI != null) testUI.SetActive(false);
@@ -155,6 +173,46 @@ public class CoinPickup : MonoBehaviour
 
         if (interactTipPanel != null) interactTipPanel.SetActive(false);
         if (testUI != null) testUI.SetActive(false);
+    }
+
+    /// <summary>
+    /// 普通金币（Scene2）：玩家死亡复活时，若本枚金币已被拾取且尚未胜利，则恢复到原位置并退回分数。
+    /// </summary>
+    private void CheckRespawnReset()
+    {
+        if (bunnyController == null)
+        {
+            GameObject player = GameObject.FindGameObjectWithTag(playerTag);
+            if (player != null) bunnyController = player.GetComponent<BunnyController>();
+            if (bunnyController == null) return;
+        }
+
+        bool dead = bunnyController.isDead;
+
+        // 检测 isDead 的下降沿：玩家复活时重置
+        if (wasPlayerDead && !dead && !IsVictory())
+            ResetPlainCoin();
+
+        wasPlayerDead = dead;
+    }
+
+    private void ResetPlainCoin()
+    {
+        if (!isCoinCollected) return;
+
+        RefundCollectedValue();
+        ResetPickupState();
+
+        // 恢复显示与交互
+        if (spriteRenderer != null) spriteRenderer.enabled = true;
+        if (bodyCollider != null) bodyCollider.enabled = true;
+
+        isPlayerInRange = false;
+    }
+
+    private bool IsVictory()
+    {
+        return FlagVictory.HasVictory;
     }
 
     private void OnContinueButtonClick()

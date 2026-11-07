@@ -31,6 +31,13 @@ public class FlagVictory : MonoBehaviour
 
     private bool won;
 
+    public static bool HasVictory { get; private set; }
+
+    static FlagVictory()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) => HasVictory = false;
+    }
+
     private void Awake()
     {
         if (victoryText != null) victoryText.gameObject.SetActive(false);
@@ -53,6 +60,7 @@ public class FlagVictory : MonoBehaviour
     private void TriggerVictory(GameObject player)
     {
         won = true;
+        HasVictory = true;
 
         // 胜利后停止蜂群；即使没有配置胜利面板，也不让蜜蜂继续追。
         BeeSwarmController beeSwarm = FindObjectOfType<BeeSwarmController>();

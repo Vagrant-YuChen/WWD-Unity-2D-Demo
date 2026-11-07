@@ -4,10 +4,23 @@ using UnityEngine.SceneManagement; // 场景切换必须的命名空间
 // 注意：是MonoBehaviour（中间有i）
 public class SceneSwitcher : MonoBehaviour
 {
-    // 点击按钮时要执行的“切换场景”方法
+    // 点击按钮时要执行的“切换场景”方法（保持旧调用不变）
     public void LoadGameScene()
     {
-        // 加载名为“GameScene1”的场景（必须和你实际的场景名完全一致）
-        SceneManager.LoadScene("GameScene1");
+        LoadScene("GameScene1");
+    }
+
+    // 通用：按场景名加载（供标题页/选关/暂停菜单复用）
+    public void LoadScene(string sceneName)
+    {
+        if (string.IsNullOrEmpty(sceneName)) return;
+
+        if (!Application.CanStreamedLevelBeLoaded(sceneName))
+        {
+            Debug.LogWarning($"[SceneSwitcher] 场景 \"{sceneName}\" 未加入 Build Settings，无法加载。");
+            return;
+        }
+
+        SceneManager.LoadScene(sceneName);
     }
 }

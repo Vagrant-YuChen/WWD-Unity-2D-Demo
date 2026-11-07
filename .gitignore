@@ -48,3 +48,8 @@ sysinfo.txt
 *.aab
 *.exe
 *.app
+
+# 本地临时分析脚本 / 导出（非项目资源）
+.tmp_*
+_chain*
+_*_preview.*
