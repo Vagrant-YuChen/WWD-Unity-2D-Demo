@@ -40,6 +40,10 @@ public class FlagVictory : MonoBehaviour
 
     private void Awake()
     {
+        // 场景里若未手动连线（例如 Scene2 早期版本），自动按名称查找 ResultPanel
+        // 以及其中的 Continue / Quit 按钮，避免因为序列化引用丢失导致胜利不触发。
+        ResolveUiReferences();
+
         if (victoryText != null) victoryText.gameObject.SetActive(false);
         if (resultPanel != null) resultPanel.SetActive(false);
 
@@ -47,6 +51,40 @@ public class FlagVictory : MonoBehaviour
             continueButton.onClick.AddListener(OnContinueButtonClick);
         if (quitButton != null)
             quitButton.onClick.AddListener(OnQuitButtonClick);
+    }
+
+    private void ResolveUiReferences()
+    {
+        // 1. 自动查找结果面板（含未激活对象）
+        if (resultPanel == null)
+        {
+            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                var go = t.gameObject;
+                if (go.scene != gameObject.scene) continue;
+                if (go.name != "ResultPanel") continue;
+                resultPanel = go;
+                break;
+            }
+        }
+
+        if (resultPanel == null) return;
+
+        // 2. 自动查找面板内的 Continue / Quit 按钮
+        var buttons = resultPanel.GetComponentsInChildren<Button>(true);
+        foreach (var b in buttons)
+        {
+            string n = b.gameObject.name.ToLowerInvariant();
+            if (continueButton == null && (n.Contains("continue") || n.Contains("resume") || n.Contains("next")))
+            {
+                continueButton = b;
+                continue;
+            }
+            if (quitButton == null && (n.Contains("main") || n.Contains("quit") || n.Contains("exit") || n.Contains("menu")))
+            {
+                quitButton = b;
+            }
+        }
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -61,6 +99,9 @@ public class FlagVictory : MonoBehaviour
     {
         won = true;
         HasVictory = true;
+
+        // 本关通关结算：把本局金币并入存档总额（按“每关最高已入账数”只补差额，杜绝重复刷）。
+        CoinWallet.BankCurrentLevel();
 
         // 胜利后停止蜂群；即使没有配置胜利面板，也不让蜜蜂继续追。
         BeeSwarmController beeSwarm = FindObjectOfType<BeeSwarmController>();

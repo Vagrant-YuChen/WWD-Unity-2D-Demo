@@ -51,15 +51,15 @@ public class CoinPickup : MonoBehaviour
     private Collider2D bodyCollider;
     #endregion
 
-    /// <summary>本局（当前场景）累计拾取的金币数量，供 UI / 兑换系统读取。</summary>
+    /// <summary>本局（当前场景）累计拾取的金币数量；通关结算时并入存档总额（见 CoinWallet）。</summary>
     public static int TotalCollected { get; private set; }
 
-    /// <summary>需要时（例如重新开始关卡）可手动清零。</summary>
+    /// <summary>需要时（例如重新开始关卡）可手动清零本局计数。</summary>
     public static void ResetTotal() => TotalCollected = 0;
 
     static CoinPickup()
     {
-        // 每次场景加载时把金币计数清零，保证是“本关”的统计
+        // 每次场景加载时清零，只统计“本关这一局”的拾取数量；真正入账在通关时进行（见 CoinWallet）。
         SceneManager.sceneLoaded += (scene, mode) => TotalCollected = 0;
     }
 
@@ -129,8 +129,8 @@ public class CoinPickup : MonoBehaviour
 
         wasPlayerDead = bunnyController != null && bunnyController.isDead;
 
-        // 计入分数
-        TotalCollected += coinValue;
+        // 计入本局金币数（通关结算时才并入存档，见 CoinWallet）。
+        TotalCollected = Mathf.Max(0, TotalCollected + coinValue);
 
         // 蜂巢金币不能 Destroy：复活时要复位并重新弹出；普通金币维持原行为。
         if (coinPopOut != null)
@@ -148,6 +148,9 @@ public class CoinPickup : MonoBehaviour
         // 兼容旧关卡：只有当配置了胜利结果面板时，才执行胜利流程（冻结/禁用玩家/弹面板）
         if (resultPanel != null)
         {
+            // 本关通关结算：把本局金币并入存档总额（仅首次通关有效，杜绝重复刷）。
+            CoinWallet.BankCurrentLevel();
+
             Time.timeScale = 0f;
             if (bunnyController != null) bunnyController.enabled = false;
             if (testUI != null) testUI.SetActive(true);
