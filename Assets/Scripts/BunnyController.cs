@@ -1229,7 +1229,7 @@ public class BunnyController : MonoBehaviour
     /// </summary>
     /// <param name="velocity">世界空间初速度</param>
     /// <param name="gravityScale">飞行中使用的重力缩放（<=0 时用 fallback）</param>
-    public void ApplyLaunch(Vector2 velocity, float gravityScale)
+    public virtual void ApplyLaunch(Vector2 velocity, float gravityScale)
     {
         if (isDead) return;
 
@@ -1269,6 +1269,12 @@ public class BunnyController : MonoBehaviour
 
     /// <summary>兼容旧调用：使用默认发射重力。</summary>
     public void ApplyLaunch(Vector2 velocity) => ApplyLaunch(velocity, launchGravityFallback);
+
+    /// <summary>
+    /// 被加农炮发射时的发声钩子。基类默认不发声，具体角色（如小羊）可覆写播放自己的叫声。
+    /// 由 CannonLauncher 在开炮音效播放结束后调用，避免与炮声重叠。
+    /// </summary>
+    public virtual void PlayLaunchVoice() { }
 
     /// <summary>
     /// 进入 / 退出风扇风力上升状态。

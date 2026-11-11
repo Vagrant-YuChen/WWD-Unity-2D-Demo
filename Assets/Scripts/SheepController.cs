@@ -36,6 +36,16 @@ public class SheepController : BunnyController
     [SerializeField] private bool autoResolveGroundLayer = true;
     #endregion
 
+    #region 大炮发射音效（被射出时的羊叫）
+    [Header("=== 大炮发射音效 ===")]
+    [Tooltip("被加农炮射出瞬间播放的音效（羊叫），与开炮音效同步")]
+    [SerializeField] private AudioClip launchVoiceClip;
+    [Tooltip("羊叫音量")]
+    [SerializeField, Range(0f, 1f)] private float launchVoiceVolume = 1f;
+
+    private AudioSource launchVoiceSource;
+    #endregion
+
     #region 平滑行走：平底碰撞体
     [Header("=== 平滑行走（平底碰撞体）===")]
     [Tooltip("用平底 BoxCollider2D 替换精灵多边形碰撞体。精灵多边形底部有多个高低不一的顶点，" +
@@ -105,6 +115,8 @@ public class SheepController : BunnyController
 
     protected override void OnCharacterConfigured()
     {
+        EnsureLaunchVoiceSource();
+
         ReplacePolygonWithFlatBox();   // 先换碰撞体，后面的半径/探针计算都基于新碰撞体
 
         base.OnCharacterConfigured();
@@ -199,6 +211,30 @@ public class SheepController : BunnyController
         sheepLandPoseHold > 0f ? sheepLandPoseHold : base.LandStateResetDelay;
 
     protected override float LandedSpeedThreshold => sheepLandedSpeedThreshold;
+    #endregion
+
+    #region 大炮发射音效
+    /// <summary>
+    /// 被加农炮发射时的羊叫。CannonLauncher 会在开炮音效播放结束后才调用该方法，
+    /// 因此叫声与炮声错开、不会重叠。
+    /// </summary>
+    public override void PlayLaunchVoice()
+    {
+        if (isDead || launchVoiceClip == null) return;
+        EnsureLaunchVoiceSource();
+        launchVoiceSource.PlayOneShot(launchVoiceClip, launchVoiceVolume);
+    }
+
+    private void EnsureLaunchVoiceSource()
+    {
+        if (launchVoiceSource != null) return;
+
+        launchVoiceSource = GetComponent<AudioSource>();
+        if (launchVoiceSource == null) launchVoiceSource = gameObject.AddComponent<AudioSource>();
+
+        launchVoiceSource.playOnAwake = false;
+        launchVoiceSource.spatialBlend = 0f;
+    }
     #endregion
 
     #region 编辑器预览

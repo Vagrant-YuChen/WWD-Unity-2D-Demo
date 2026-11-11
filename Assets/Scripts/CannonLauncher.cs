@@ -44,13 +44,18 @@ public class CannonLauncher : MonoBehaviour
     [SerializeField] private GameObject muzzleSmoke;
     [Tooltip("烟特效存活时间（秒）")]
     [SerializeField] private float smokeLifetime = 1f;
+    [Tooltip("炮口烟相对炮身 SpriteRenderer 的叠加层级（越大越靠前）。预制体默认是 Default 层 order 0，会被地面/炮身盖住，故需抬高")]
+    [SerializeField] private int smokeSortingOrderOffset = 1;
     [SerializeField] private AudioClip fireSound;
     [Range(0f, 1f)]
     [SerializeField] private float volume = 0.8f;
+    [Tooltip("羊叫相对『炮声片段长度』的偏移（秒，可为负）。0 = 等整个炮声片段播完才叫；\n若炮声音频比实际发声长（尾部有多余静音），填负值可让羊叫提前响起、两者衔接更紧。\n例如片段 2.0s、实际声音 0.8s，就填 -1.2")]
+    [SerializeField] private float launchVoiceExtraDelay = 0f;
     #endregion
 
     #region 私有状态
     private AudioSource audioSource;
+    private SpriteRenderer bodySprite;
     private Transform playerTransform;
     private BunnyController loadedBunny;
     private Rigidbody2D loadedRb;
@@ -58,6 +63,7 @@ public class CannonLauncher : MonoBehaviour
     private float currentCharge;
     private bool isCharging;
     private Coroutine restoreCollisionRoutine;
+    private Coroutine launchVoiceRoutine;
     #endregion
 
     #region 对外只读接口（镜头 / UI 等外部系统用）
@@ -98,6 +104,7 @@ public class CannonLauncher : MonoBehaviour
     {
         if (cannonAnimator == null) cannonAnimator = GetComponent<Animator>();
         if (muzzle == null) muzzle = transform;
+        bodySprite = GetComponent<SpriteRenderer>();
 
         if (fireSound != null)
         {
@@ -219,6 +226,32 @@ public class CannonLauncher : MonoBehaviour
         ChargeChanged?.Invoke(0f);
 
         PlayFireEffects();
+
+        // 炮声播完之后再让被射出的角色发声（羊叫），避免与炮声重叠
+        ScheduleLaunchVoice(bunny);
+    }
+
+    /// <summary>
+    /// 在开炮音效结束后触发角色的发射叫声。由加农炮统一计时，
+    /// 因为只有这里知道 fireSound 的实际时长。
+    /// </summary>
+    private void ScheduleLaunchVoice(BunnyController bunny)
+    {
+        if (bunny == null) return;
+
+        // 负值会提前（用于炮声音频尾部有多余静音、实际发声比片段短的情况）
+        float delay = Mathf.Max(0f, (fireSound != null ? fireSound.length : 0f) + launchVoiceExtraDelay);
+
+        if (launchVoiceRoutine != null) StopCoroutine(launchVoiceRoutine);
+        launchVoiceRoutine = StartCoroutine(PlayLaunchVoiceAfter(bunny, delay));
+    }
+
+    private IEnumerator PlayLaunchVoiceAfter(BunnyController bunny, float delay)
+    {
+        if (delay > 0f) yield return new WaitForSeconds(delay);
+
+        if (bunny != null) bunny.PlayLaunchVoice();
+        launchVoiceRoutine = null;
     }
 
     private void PlayFireEffects()
@@ -228,6 +261,16 @@ public class CannonLauncher : MonoBehaviour
         if (muzzleSmoke != null)
         {
             GameObject smoke = Instantiate(muzzleSmoke, muzzle.position, muzzle.rotation);
+
+            // 把烟雾对齐到炮身所在的排序层并叠加层级偏移：
+            // 预制体自带的 SpriteRenderer 是 Default 层 order 0，会被地面/前景/炮身(更高的 order)盖住而看不见。
+            SpriteRenderer smokeSprite = smoke.GetComponentInChildren<SpriteRenderer>(true);
+            if (smokeSprite != null && bodySprite != null)
+            {
+                smokeSprite.sortingLayerID = bodySprite.sortingLayerID;
+                smokeSprite.sortingOrder = bodySprite.sortingOrder + smokeSortingOrderOffset;
+            }
+
             if (smokeLifetime > 0f) Destroy(smoke, smokeLifetime);
         }
 

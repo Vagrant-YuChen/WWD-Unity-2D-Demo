@@ -1,14 +1,16 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
 /// 金币数量显示（暂停界面里的 GameUI_GoldenCoinCount）。
-/// 逻辑：读取 CoinWallet.Total（跨关卡持久化、存在本地存档里的已入账金币总数），
-/// 把它拆成一位一位的数字，用 GameUI_0~9 的贴图逐位显示。
-/// 该总额只在“某关首次通关结算”时增加（见 CoinWallet / CoinPickup / FlagVictory），
-/// 重玩已入账的关卡不会重复累加，因此不会被刷。每逢暂停界面被激活（ESC 打开）会自动刷新。
+/// 显示口径：CoinWallet.Total（已入账总额）+ 本局尚未入账的正差额，
+/// 即“若此刻通关结算，钱包里会有的金币数”。所以玩家在关卡里每捡到一枚金币，
+/// 这个数字都会实时增长；而重玩已入账关卡时，只有超过该关历史最高收集数才会继续增加，
+/// 保持“每关只按最高收集数入账、无法刷金币”的设计（见 CoinWallet / CoinPickup / FlagVictory）。
+/// 数字用 GameUI_0~9 的贴图逐位显示，每逢暂停界面被激活（ESC 打开）都会刷新。
 ///
 /// 用法：
 ///  1) 把这个脚本挂在 GameUI_GoldenCoinCount 这个图片物体上；
@@ -33,6 +35,7 @@ public class GoldenCoinCountDisplay : MonoBehaviour
     // 显示用到的全部数字图片：第 0 个就是模板本身，其余为运行时生成的克隆。
     private readonly List<Image> _digitImages = new List<Image>();
     private Image _template;
+    private int _lastDisplayed = int.MinValue;
 
     private void Awake()
     {
@@ -51,10 +54,41 @@ public class GoldenCoinCountDisplay : MonoBehaviour
         Refresh();
     }
 
-    /// <summary>用一个外部数值刷新（默认不传则读取 CoinWallet.Total——跨关卡存档金币总数）。</summary>
+    private void Update()
+    {
+        // 只有值真正变化时才重绘，避免每帧重复拆字/生成图片。
+        // 暂停界面在游戏中通常是关闭的，这里的 Update 只在其可见时运行；
+        // 若把它当成常驻 HUD 使用，也能实时跟着拾取数增长。
+        int value = ComputeDisplayValue();
+        if (value != _lastDisplayed)
+            Refresh(value);
+    }
+
+    /// <summary>
+    /// 刷新暂停界面里的金币数量。
+    /// 显示的是“若此刻结算”的金币总额 = 已入账总额 + 本局尚未入账的正差额，
+    /// 因此玩家在关卡里每捡到一枚金币，这里都会实时增加（不会把已入账的部分重复计入）。
+    /// </summary>
     public void Refresh()
     {
-        Refresh(CoinWallet.Total);
+        Refresh(ComputeDisplayValue());
+    }
+
+    /// <summary>
+    /// 计算要显示的金币数：CoinWallet.Total（已入账总额）+ 本局收集数超过“该关已入账数”的差额。
+    /// 既能在捡金币时实时增长，又保持“每关只按最高收集数入账、无法刷金币”的设计。
+    /// </summary>
+    public static int ComputeDisplayValue()
+    {
+        int total = CoinWallet.Total;
+
+        string sceneName = SceneManager.GetActiveScene().name;
+        int banked = CoinWallet.GetBankedAmount(sceneName);
+
+        int pendingGain = CoinPickup.TotalCollected - banked;
+        if (pendingGain < 0) pendingGain = 0;
+
+        return total + pendingGain;
     }
 
     /// <summary>把 value 显示成逐位数字贴图。</summary>
@@ -68,6 +102,7 @@ public class GoldenCoinCountDisplay : MonoBehaviour
         }
 
         if (value < 0) value = 0;
+        _lastDisplayed = value;
 
         string digits = value.ToString();
         int count = digits.Length;
