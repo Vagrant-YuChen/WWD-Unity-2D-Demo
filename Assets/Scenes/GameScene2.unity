@@ -846,7 +846,7 @@ Transform:
   m_GameObject: {fileID: 9295487}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -6.3745136, y: -0.9886432, z: 0.05923491}
+  m_LocalPosition: {x: -6.304, y: -0.616, z: 0.05923491}
   m_LocalScale: {x: 0.3, y: 0.25, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -3342,8 +3342,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ce53f837a5e8e6c428106662d4e87048, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 1.6
-  sprintMultiplier: 1.8
+  moveSpeed: 2.2
+  sprintMultiplier: 1.6
   sprintEnabledScenes:
   - GameScene2
   groundFriction: 10
@@ -4084,7 +4084,9 @@ MonoBehaviour:
   continueButton: {fileID: 0}
   quitButton: {fileID: 0}
   testUI: {fileID: 0}
-  interactDistance: 1.5
+  horizontalRange: 0.15
+  verticalTolerance: 0.1
+  detectionOffset: {x: -0.01, y: 0}
   playerTag: Player
   coinValue: 1
 --- !u!70 &404867693
@@ -5667,7 +5669,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 26, y: 14, z: 1}
+  m_LocalScale: {x: 25, y: 14, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -8697,7 +8699,9 @@ MonoBehaviour:
   continueButton: {fileID: 0}
   quitButton: {fileID: 0}
   testUI: {fileID: 0}
-  interactDistance: 1.5
+  horizontalRange: 0.2
+  verticalTolerance: 0.1
+  detectionOffset: {x: 0, y: 0}
   playerTag: Player
   coinValue: 1
 --- !u!70 &1107636558
@@ -9887,6 +9891,7 @@ GameObject:
   - component: {fileID: 1312858848}
   - component: {fileID: 1312858847}
   - component: {fileID: 1887654002}
+  - component: {fileID: 1887654003}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -12416,6 +12421,34 @@ MonoBehaviour:
   restoreOnDisable: 1
   debugLogs: 0
   drawGizmos: 0
+--- !u!114 &1887654003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1312858846}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 681faa4f674e00742b3cafd0947fc211, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableSequence: 1
+  startHoldDuration: 0.4
+  panSpeed: 4.5
+  minPanDuration: 0.35
+  panFrameOrthoSize: 0
+  flagCloseupOrthoSize: 0
+  flagCloseupHold: 1
+  pullOutDuration: 1.5
+  mapHoldDuration: 0.6
+  mapPadding: 1
+  returnDuration: 1.1
+  returnFrameOrthoSize: 0
+  clampToBackground: 1
+  backgroundObjectName: BackGround
+  backgroundInset: 0.05
+  debugLogs: 0
 --- !u!1 &1911038700
 GameObject:
   m_ObjectHideFlags: 0

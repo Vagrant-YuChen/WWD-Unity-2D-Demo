@@ -512,6 +512,19 @@ public class BunnyController : MonoBehaviour
 
     private void UpdateJumpBuffer()
     {
+        // 暂停 / 冻结时（timeScale = 0，如开场弹窗、暂停菜单）不接收跳跃输入，
+        // 并清空残留缓冲：否则 Update 仍在跑而 deltaTime 为 0，缓冲不会衰减，
+        // 恢复后会导致角色自动跳一次。
+        //
+        // 另外：如果这一帧的空格被用于关闭开场弹窗（SpaceResumeFrame），也一并忽略，
+        // 避免"用空格开始游戏"在开局瞬间触发一次跳跃。
+        if (Time.timeScale <= 0f ||
+            RunningGame.UI.IntroPopupController.SpaceResumeFrame == Time.frameCount)
+        {
+            jumpBufferTimer = 0f;
+            return;
+        }
+
         if (Input.GetKeyDown(KeyCode.Space))
         {
             jumpBufferTimer = jumpBufferTime;

@@ -17,6 +17,18 @@ namespace RunningGame.UI
         public bool pauseGameWhileOpen = true;
         public bool hidePauseEscapeWhileOpen = true;
 
+        /// <summary>弹窗关闭（玩家点击 Resume 正式进入游戏）时触发，供镜头开场序列等外部系统监听。</summary>
+        public event System.Action Closed;
+
+        /// <summary>弹窗当前是否处于打开（冻结）状态。</summary>
+        public bool IsOpen => _isOpen;
+
+        /// <summary>
+        /// 因按下"空格"而关闭弹窗时记录的帧号。角色会忽略这一帧的空格，
+        /// 避免"用空格开始游戏"导致角色开局自动跳一次。
+        /// </summary>
+        public static int SpaceResumeFrame { get; private set; } = int.MinValue;
+
         private float _savedTimeScale = 1f;
         private bool _isOpen;
         private PauseMenuController _pauseController;
@@ -67,6 +79,24 @@ namespace RunningGame.UI
                 _pauseController.allowEscape = true;
 
             // 不改动光标：与暂停菜单一致，保持可见/解锁状态。
+
+            // 通知外部系统（如开场镜头序列）游戏已正式进入
+            Closed?.Invoke();
+        }
+
+        private void Update()
+        {
+            // 弹窗打开时，按回车 / 小键盘回车 / 空格 都等同于点击 Resume。
+            if (!_isOpen) return;
+
+            bool enter = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+            bool space = Input.GetKeyDown(KeyCode.Space);
+            if (!enter && !space) return;
+
+            // 记录这一帧是"空格"关闭的，让角色忽略这次空格，避免开局自动跳。
+            if (space) SpaceResumeFrame = Time.frameCount;
+
+            Close();
         }
 
         private void OnDisable()
