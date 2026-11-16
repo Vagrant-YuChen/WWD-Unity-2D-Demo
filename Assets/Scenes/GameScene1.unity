@@ -3803,6 +3803,50 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &771000101
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 999867728}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7d1f0c24e9a4d6a8f5c3b1e2d0a7c94, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  loopClip: {fileID: 8300000, guid: 09f5f5d3af98ceb46b3fbed358012316, type: 3}
+  rangeOrigin: {fileID: 999867731}
+  hearingRadius: 10
+  maxVolume: 1
+  volumeCurve: 2
+  playerLayer:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  drawGizmo: 1
+  gizmoColor: {r: 0.2, g: 0.9, b: 1, a: 0.9}
+--- !u!114 &771000102
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1790354511}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7d1f0c24e9a4d6a8f5c3b1e2d0a7c94, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  loopClip: {fileID: 8300000, guid: fcbdfcfeee36f134d9ecc6ef0e2ba1fb, type: 3}
+  rangeOrigin: {fileID: 361393158}
+  hearingRadius: 7
+  maxVolume: 0.5
+  volumeCurve: 2
+  playerLayer:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  drawGizmo: 1
+  gizmoColor: {r: 0.2, g: 0.9, b: 1, a: 0.9}
 --- !u!1 &822993438
 GameObject:
   m_ObjectHideFlags: 0
@@ -6613,6 +6657,7 @@ GameObject:
   - component: {fileID: 999867729}
   - component: {fileID: 999867732}
   - component: {fileID: 999867733}
+  - component: {fileID: 771000101}
   m_Layer: 0
   m_Name: FatalFarmVehicles
   m_TagString: Untagged
@@ -6769,7 +6814,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 1
   triggerOnce: 0
-  deathSound: {fileID: 0}
+  deathSound: {fileID: 8300000, guid: 7516facae1ba16048a483c4f97ec6b3f, type: 3}
   bladeAnimator: {fileID: 0}
   hitAnimTrigger: OnHit
 --- !u!1 &1007229554
@@ -9070,6 +9115,11 @@ MonoBehaviour:
   playerLayers:
     serializedVersion: 2
     m_Bits: 4294967295
+  openClip: {fileID: 8300000, guid: d99acf400da025d4c8627a1b9e28760d, type: 3}
+  closeClip: {fileID: 8300000, guid: a7493a4a91a90be4ca9473e6d350cefd, type: 3}
+  sfxVolume: 0.3
+  sfxSpatialBlend: 0.3
+  sfxMinInterval: 0.08
   showDetectionGizmo: 1
   handleSize: 0.09
 --- !u!1 &1515840978
@@ -9832,7 +9882,14 @@ MonoBehaviour:
   damageEndFrame: 5
   totalFramesOverride: 0
   killPlayerOnHit: 1
-  killSound: {fileID: 0}
+  spraySound: {fileID: 8300000, guid: 4850df3c6f145c2479816f90f6a82319, type: 3}
+  spraySoundVolume: 0.3
+  hearingRadius: 10
+  hearingOffset: {x: 0, y: 0}
+  hearingVolumeCurve: 2
+  drawHearingGizmo: 1
+  hearingGizmoColor: {r: 0.2, g: 0.9, b: 1, a: 0.9}
+  killSound: {fileID: 8300000, guid: 4e65d8429c274aa4ca338d89b0015cd3, type: 3}
   killSoundVolume: 0.8
   debugLogs: 0
   drawDamageGizmo: 1
@@ -10679,6 +10736,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1790354512}
   - component: {fileID: 1790354513}
+  - component: {fileID: 771000102}
   m_Layer: 0
   m_Name: Ferris
   m_TagString: Untagged

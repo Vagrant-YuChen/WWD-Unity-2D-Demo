@@ -1179,7 +1179,7 @@ public class BunnyController : MonoBehaviour
         }
     }
 
-    public void TriggerDeath()
+    public virtual void TriggerDeath()
     {
         if (isDead) return;
 
@@ -1197,7 +1197,12 @@ public class BunnyController : MonoBehaviour
             anim.SetBool("IsDead", true);
             anim.SetTrigger("OnDeath");
         }
+
+        PlayDeathVoice();
     }
+
+    /// <summary>角色死亡时的语音/声音。基类为空，由子类（如小羊）按需覆写。</summary>
+    protected virtual void PlayDeathVoice() { }
 
     public void SetRespawnPosition(Vector3 newPos)
     {

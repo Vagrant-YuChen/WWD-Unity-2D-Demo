@@ -22,16 +22,6 @@ public class WreckingBallKill : MonoBehaviour
     [Tooltip("是否在上一帧与当前帧之间做扫掠检测（开启后可避免高速摆动穿过小羊却不判定）")]
     [SerializeField] private bool sweepBetweenFrames = true;
 
-    [Tooltip("击中兔子时播放的音效（可选）")]
-    [SerializeField] private AudioClip hitSound;
-
-    [Tooltip("击中音效音量")]
-    [Range(0f, 1f)]
-    [SerializeField] private float hitVolume = 0.9f;
-
-    [Tooltip("两次击中音效之间的最短间隔（秒），避免连续接触时音效叠成噪音")]
-    [SerializeField] private float soundCooldown = 0.15f;
-
     [Tooltip("在 Console 打印击杀信息，方便确认判定是否生效")]
     [SerializeField] private bool debugLogs;
     #endregion
@@ -39,14 +29,12 @@ public class WreckingBallKill : MonoBehaviour
     #region 运行时状态
     private Collider2D ballCollider;
     private CircleCollider2D ballCircle;
-    private AudioSource audioSource;
 
     private ContactFilter2D overlapFilter;
     private readonly Collider2D[] overlapBuffer = new Collider2D[8];
 
     private Vector2 lastCenter;
     private bool hasLastCenter;
-    private float lastSoundTime = float.NegativeInfinity;
     #endregion
 
     #region 生命周期
@@ -140,8 +128,8 @@ public class WreckingBallKill : MonoBehaviour
         BunnyController bunny = BunnyContactUtility.FindBunny(other);
         if (bunny == null || bunny.isDead) return;
 
+        // 死亡语音统一由角色控制器（SheepController.TriggerDeath）播放，不再在此重复播放。
         bunny.TriggerDeath();
-        PlayHitSound();
 
         if (debugLogs)
         {
@@ -167,22 +155,6 @@ public class WreckingBallKill : MonoBehaviour
 
         float scale = Mathf.Max(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y));
         return ballCircle.radius * scale * Mathf.Max(0.01f, killRadiusScale);
-    }
-
-    private void PlayHitSound()
-    {
-        if (hitSound == null) return;
-        if (Time.time - lastSoundTime < soundCooldown) return;
-
-        if (audioSource == null && !TryGetComponent(out audioSource))
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.playOnAwake = false;
-            audioSource.spatialBlend = 0f;
-        }
-
-        audioSource.PlayOneShot(hitSound, hitVolume);
-        lastSoundTime = Time.time;
     }
     #endregion
 

@@ -50,6 +50,19 @@ public class OneWayDoorController : MonoBehaviour
     [SerializeField] private Vector2 detectionOffset = new Vector2(-1.2f, -0.3f);
     [SerializeField] private LayerMask playerLayers = ~0;
 
+    [Header("SFX")]
+    [Tooltip("开门音效（卷帘升起时播放）")]
+    [SerializeField] private AudioClip openClip;
+    [Tooltip("关门音效（卷帘落下时播放）")]
+    [SerializeField] private AudioClip closeClip;
+    [Range(0f, 1f)]
+    [SerializeField] private float sfxVolume = 0.85f;
+    [Tooltip("0 = 纯 2D（跟随相机），1 = 完全 3D 空间音。默认轻微留一点方位感。")]
+    [Range(0f, 1f)]
+    [SerializeField] private float sfxSpatialBlend = 0.15f;
+    [Tooltip("同一音效的最短重复间隔，防止关门途中反复触发时音效叠成一团。")]
+    [SerializeField] private float sfxMinInterval = 0.08f;
+
     [Header("Detection Gizmo")]
     [Tooltip("Always draw a faint detection box even when the door is not selected.")]
     [SerializeField] private bool showDetectionGizmo = true;
@@ -63,6 +76,11 @@ public class OneWayDoorController : MonoBehaviour
     private float idleTimer;
     private Coroutine animRoutine;
 
+    // SFX
+    private AudioSource sfxSource;
+    private float lastOpenSfxTime = float.NegativeInfinity;
+    private float lastCloseSfxTime = float.NegativeInfinity;
+
     // Runtime flag used only to tint the detection gizmo while playing.
     private bool playerInsideDetection;
 
@@ -72,6 +90,7 @@ public class OneWayDoorController : MonoBehaviour
         if (lightsRenderer == null) lightsRenderer = FindRenderer("OneWayDoor-SignLights");
         if (scanRenderer == null) scanRenderer = FindRenderer("OneWayDoor-ScanEffect");
         if (gateCollider == null && gateRenderer != null) gateCollider = gateRenderer.GetComponent<Collider2D>();
+        EnsureSfxSource();
     }
 
     private void Start()
@@ -120,6 +139,7 @@ public class OneWayDoorController : MonoBehaviour
         idleTimer = 0f;
         SetLight(green: true);
         if (gateCollider != null) gateCollider.enabled = false;
+        PlayDoorSfx(openClip, ref lastOpenSfxTime);
         StartAnimateTo(gateFrames.Length - 1, onDone: () => phase = Phase.Open);
     }
 
@@ -128,11 +148,48 @@ public class OneWayDoorController : MonoBehaviour
         if (phase == Phase.Closing) return;
         phase = Phase.Closing;
         SetLight(green: false);
+        PlayDoorSfx(closeClip, ref lastCloseSfxTime);
         StartAnimateTo(0, onDone: () =>
         {
             phase = Phase.Closed;
             if (gateCollider != null) gateCollider.enabled = true;
         });
+    }
+
+    // ---------------------------------------------------------------------
+    // SFX
+    // ---------------------------------------------------------------------
+
+    private void EnsureSfxSource()
+    {
+        if (sfxSource != null) return;
+
+        sfxSource = GetComponent<AudioSource>();
+        if (sfxSource == null) sfxSource = gameObject.AddComponent<AudioSource>();
+
+        sfxSource.playOnAwake = false;
+        sfxSource.loop = false;
+        sfxSource.volume = sfxVolume;
+        sfxSource.spatialBlend = sfxSpatialBlend;
+        sfxSource.dopplerLevel = 0f;
+        sfxSource.minDistance = 1f;
+        sfxSource.maxDistance = 30f;
+    }
+
+    private void PlayDoorSfx(AudioClip clip, ref float lastPlayTime)
+    {
+        if (clip == null) return;
+
+        // 同一音效短时间内不重复，避免关门途中玩家进出导致音效叠加。
+        if (Time.time - lastPlayTime < sfxMinInterval) return;
+        lastPlayTime = Time.time;
+
+        EnsureSfxSource();
+        if (sfxSource == null) return;
+
+        sfxSource.volume = sfxVolume;
+        sfxSource.spatialBlend = sfxSpatialBlend;
+        sfxSource.PlayOneShot(clip);
     }
 
     private void ApplyClosedVisuals()

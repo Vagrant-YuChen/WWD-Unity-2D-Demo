@@ -19,6 +19,14 @@ using UnityEngine;
 /// 如果没有自动装配，运行菜单：
 ///   Tools/Flame Thrower/Setup Flame Throwers In Open Scene
 ///
+/// 喷火音效（shoot_flame）：
+///   · 每喷一次（每个喷火周期）最多播放一次；
+///   · 只有兔子进入「听觉圆」时才会响，避免玩家在全图都能听到喷火声；
+///   · 音量按到喷火器的直线距离线性衰减：贴着喷火器 = 满音量，圆内一半距离 = 半音量，
+///     圆边缘 / 圈外 = 0（volume = 1 - 距离 / hearingRadius），播放过程中随兔子移动实时变化；
+///   · 听觉圆的半径 hearingRadius / 圆心偏移 hearingOffset 可以在 Inspector 里调，
+///     并在 Scene 视图里以青色圆实时显示（选中时右边缘有拖拽手柄，细线是半音量参考圈）。
+///
 /// 在 Scene 里调火焰 / 伤害盒：
 ///   · 选中 FlameThrower 下的子物体 Flame，用 Inspector / Scene 的 Transform 工具调
 ///     Scale X = 火焰宽度、Scale Y = 火焰长度、Position = 喷出位置、Rotation = 喷火方向；
@@ -31,6 +39,17 @@ using UnityEngine;
 [RequireComponent(typeof(Animator))]
 public class FlameThrowerTrap : MonoBehaviour
 {
+    /// <summary>喷火音效的距离衰减曲线。</summary>
+    public enum HearingVolumeCurve
+    {
+        [Tooltip("音量 = 1 - 距离/半径。贴脸满音量，半半径处 0.5，边缘 0（默认）")]
+        Linear = 0,
+        [Tooltip("音量 = √(1 - 距离/半径)。远处衰减更慢，整个圈内都更响，适合想让范围存在感更强的情况")]
+        SquareRoot = 1,
+        [Tooltip("音量 = (1 - 距离/半径)²。远处衰减更快，只有贴近才明显，适合强调\"靠近才听得到\"")]
+        Squared = 2,
+    }
+
     #region 可配置参数
     [Header("=== 动画（自动装配会填好） ===")]
     [Tooltip("火焰喷射器身上的 Animator。留空会在 Awake 自动获取")]
@@ -74,6 +93,20 @@ public class FlameThrowerTrap : MonoBehaviour
     [Tooltip("命中时是否杀死小兔")]
     [SerializeField] private bool killPlayerOnHit = true;
 
+    [Header("=== 喷火音效（按圆形范围播放） ===")]
+    [Tooltip("喷火音效：每次喷火只播放一次")]
+    [SerializeField] private AudioClip spraySound;
+    [SerializeField, Range(0f, 1f)] private float spraySoundVolume = 0.8f;
+    [Tooltip("听觉检测圆的半径（世界单位）。只有兔子进入这个圆内才会听到喷火音效，避免全图都听到。音量按距离线性衰减：圆心处满音量，圆边缘衰减到 0")]
+    [SerializeField, Min(0.1f)] private float hearingRadius = 10f;
+    [Tooltip("听觉检测圆的圆心相对本物体中心的偏移（世界单位）")]
+    [SerializeField] private Vector2 hearingOffset = Vector2.zero;
+    [Tooltip("距离衰减曲线：Linear = 1 - 距离/半径（半半径处半音量）；SquareRoot = 远处更响；Squared = 远处更轻")]
+    [SerializeField] private HearingVolumeCurve hearingVolumeCurve = HearingVolumeCurve.Linear;
+    [Tooltip("在 Scene 视图画出听觉检测圆（不选中也显示）")]
+    [SerializeField] private bool drawHearingGizmo = true;
+    [SerializeField] private Color hearingGizmoColor = new Color(0.2f, 0.9f, 1f, 0.9f);
+
     [Header("=== 表现 ===")]
     [Tooltip("火焰命中音效（可选）")]
     [SerializeField] private AudioClip killSound;
@@ -106,6 +139,10 @@ public class FlameThrowerTrap : MonoBehaviour
     private bool spraying;
     private bool initialized;
     private bool warnedMissingAnimation;
+
+    // 喷火音效：每个喷火周期最多播放一次，且只在兔子处于听觉圆内时播放。
+    private AudioSource spraySfxSource;
+    private bool spraySoundPlayedThisCycle;
     #endregion
 
     #region 对外只读接口（方便其他脚本 / 调试）
@@ -137,6 +174,21 @@ public class FlameThrowerTrap : MonoBehaviour
 
         sprayHash = Animator.StringToHash(sprayStateName);
         idleHash = Animator.StringToHash(idleStateName);
+
+        EnsureSpraySfxSource();
+    }
+
+    private void EnsureSpraySfxSource()
+    {
+        if (spraySfxSource != null) return;
+
+        spraySfxSource = GetComponent<AudioSource>();
+        if (spraySfxSource == null) spraySfxSource = gameObject.AddComponent<AudioSource>();
+
+        spraySfxSource.playOnAwake = false;
+        spraySfxSource.loop = false;
+        spraySfxSource.spatialBlend = 0f;   // 是否听得见由听觉圆决定，这里用 2D 保证圆内音量稳定
+        spraySfxSource.dopplerLevel = 0f;
     }
 
     private SpriteRenderer FindFlameRenderer()
@@ -212,6 +264,9 @@ public class FlameThrowerTrap : MonoBehaviour
             // Animator 的 Idle 状态可能把渲染器关掉，喷火期间强制打开，避免只看到本体
             if (flameRenderer != null && !flameRenderer.enabled) flameRenderer.enabled = true;
 
+            // 喷火开始后才走进听觉圆的玩家，补播一次本轮音效（每个周期仍只播一次）
+            if (!spraySoundPlayedThisCycle) TryPlaySpraySound();
+
             sprayClock += dt;
 
             if (manualSampling)
@@ -227,6 +282,9 @@ public class FlameThrowerTrap : MonoBehaviour
             idleClock -= dt;
             if (idleClock <= 0f) BeginSpray();
         }
+
+        // 音量跟随距离实时变化（喷火结束后的音效尾巴也继续随距离衰减）
+        UpdateSpraySoundVolume();
     }
 
     private void LateUpdate()
@@ -241,6 +299,8 @@ public class FlameThrowerTrap : MonoBehaviour
     private void OnDisable()
     {
         IsDamaging = false;
+
+        if (spraySfxSource != null && spraySfxSource.isPlaying) spraySfxSource.Stop();
     }
 
     #region 动画剪辑信息
@@ -273,8 +333,11 @@ public class FlameThrowerTrap : MonoBehaviour
         spraying = true;
         sprayClock = 0f;
         IsDamaging = false;
+        spraySoundPlayedThisCycle = false;   // 新一轮喷火，音效计数重置
 
         if (flameRenderer != null) flameRenderer.enabled = true;
+
+        TryPlaySpraySound();
 
         if (hasSprayState && flameAnimator != null)
         {
@@ -351,6 +414,99 @@ public class FlameThrowerTrap : MonoBehaviour
     }
     #endregion
 
+    #region 听觉检测与喷火音效
+    /// <summary>听觉检测圆的世界圆心（物体中心 + 偏移）。</summary>
+    private Vector2 HearingCenter => (Vector2)transform.position + hearingOffset;
+
+    private float HearingRadius => Mathf.Max(0.1f, hearingRadius);
+
+    /// 距离 → 音量倍率的衰减曲线，由 Inspector 的 Hearing Volume Curve 选择。
+    /// Linear: 1 - 距离/半径；SquareRoot: √(1 - 距离/半径)；Squared: (1 - 距离/半径)²。
+    /// </summary>
+    private float VolumeScaleAtDistance(float distance)
+    {
+        float remaining = Mathf.Clamp01(1f - distance / HearingRadius);
+        switch (hearingVolumeCurve)
+        {
+            case HearingVolumeCurve.SquareRoot:
+                return Mathf.Sqrt(remaining);
+            case HearingVolumeCurve.Squared:
+                return remaining * remaining;
+            default:
+                return remaining;
+        }
+    }
+
+    /// <summary>
+    /// 每个喷火周期最多触发一次音效；只有兔子处于听觉圆内（音量 > 0）才会真正开始播放。
+    /// 起始音量按当前距离算出，之后每帧由 UpdateSpraySoundVolume 跟随距离实时变化。
+    /// </summary>
+    private void TryPlaySpraySound()
+    {
+        if (spraySoundPlayedThisCycle) return;
+        if (spraySound == null) return;
+
+        if (!TryGetNearestBunnyDistance(out float distance)) return;
+
+        float volumeScale = VolumeScaleAtDistance(distance);
+        if (volumeScale <= 0.0001f) return;   // 圆外 / 贴着圆边缘：一点声音都不播
+
+        spraySoundPlayedThisCycle = true;
+
+        EnsureSpraySfxSource();
+        if (spraySfxSource == null) return;
+
+        // 用 Play() + 逐帧改 volume 的方式播放，而不是 PlayOneShot 固定音量，
+        // 这样兔子在喷火过程中走动时，听到的音量会随距离连续变化。
+        spraySfxSource.clip = spraySound;
+        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale);
+        spraySfxSource.Play();
+
+        if (debugLogs)
+            Debug.Log($"[{name}] 播放喷火音效（距离 {distance:0.##} / 半径 {HearingRadius:0.##}，音量 {spraySfxSource.volume:0.##}）。");
+    }
+
+    /// <summary>
+    /// 音效播放期间每帧刷新音量：按兔子到圆心的距离线性衰减；兔子死亡 / 不在场时静音，
+    /// 但不停掉音源，这样重新走进范围还能继续听到剩余部分。
+    /// </summary>
+    private void UpdateSpraySoundVolume()
+    {
+        if (spraySfxSource == null || !spraySfxSource.isPlaying) return;
+
+        float volumeScale = TryGetNearestBunnyDistance(out float distance)
+            ? VolumeScaleAtDistance(distance)
+            : 0f;
+
+        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale);
+    }
+
+    /// <summary>找到离听觉圆心最近的活着的兔子；输出它到圆心的直线距离（不限半径，圈外也算）。</summary>
+    private bool TryGetNearestBunnyDistance(out float distance)
+    {
+        distance = float.MaxValue;
+
+        Vector2 center = HearingCenter;
+        // 用半径 + 少量余量做粗筛，避免全场景搜索
+        float searchRadius = HearingRadius + 2f;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(center, searchRadius, playerLayer);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D hit = hits[i];
+            if (hit == null) continue;
+
+            BunnyController bunny = BunnyContactUtility.FindBunny(hit);
+            if (bunny == null || bunny.isDead) continue;
+
+            float d = Vector2.Distance(center, bunny.transform.position);
+            if (d < distance) distance = d;
+        }
+
+        return distance < float.MaxValue;
+    }
+    #endregion
+
     #region 编辑器
     private void OnValidate()
     {
@@ -363,6 +519,8 @@ public class FlameThrowerTrap : MonoBehaviour
             Mathf.Max(0.01f, damageBoxSize.y));
         damageStartFrame = Mathf.Max(0, damageStartFrame);
         damageEndFrame = Mathf.Max(damageStartFrame, damageEndFrame);
+
+        hearingRadius = Mathf.Max(0.1f, hearingRadius);
 
         if (flameAnimator == null) flameAnimator = GetComponent<Animator>();
         if (bodyRenderer == null) bodyRenderer = GetComponent<SpriteRenderer>();
@@ -441,28 +599,43 @@ public class FlameThrowerTrap : MonoBehaviour
     private void OnDrawGizmos()
     {
         // 不选中物体也一直显示伤害盒：这样选中子物体 Flame 调长度 / 位置时，盒子依然可见
-        if (!drawDamageGizmo || !alwaysShowDamageGizmo) return;
-        DrawDamageBox();
+        if (drawDamageGizmo && alwaysShowDamageGizmo) DrawDamageBox();
+
+        // 听觉检测圆始终可见，方便确认兔子进出半径范围
+        if (drawHearingGizmo) DrawHearingCircle(alwaysShowDamageGizmo ? 1f : 0.55f);
     }
 
     private void OnDrawGizmosSelected()
     {
-        if (!drawDamageGizmo) return;
-
         DrawNozzleMarker();
 
-        // 没开“始终显示”时，选中才画盒子
-        if (!alwaysShowDamageGizmo) DrawDamageBox();
+        if (drawDamageGizmo)
+        {
+            // 没开“始终显示”时，选中才画盒子
+            if (!alwaysShowDamageGizmo) DrawDamageBox();
 
 #if UNITY_EDITOR
-        if (TryGetDamageBox(out Vector3 center, out Vector2 size, out float angle))
-        {
-            int frames = totalFramesOverride > 0 ? totalFramesOverride : totalFrames;
-            UnityEditor.Handles.Label(
-                center + Vector3.up * (size.y * 0.5f + 0.08f),
-                $"火焰伤害帧 {damageStartFrame}-{damageEndFrame}（共 {frames} 帧）\n伤害盒 {size.x:0.##} × {size.y:0.##}  旋转 {angle:0.#}°");
-        }
+            if (TryGetDamageBox(out Vector3 center, out Vector2 size, out float angle))
+            {
+                int frames = totalFramesOverride > 0 ? totalFramesOverride : totalFrames;
+                UnityEditor.Handles.Label(
+                    center + Vector3.up * (size.y * 0.5f + 0.08f),
+                    $"火焰伤害帧 {damageStartFrame}-{damageEndFrame}（共 {frames} 帧）\n伤害盒 {size.x:0.##} × {size.y:0.##}  旋转 {angle:0.#}°");
+            }
 #endif
+        }
+
+        if (drawHearingGizmo)
+        {
+            DrawHearingCircle(1f);
+
+#if UNITY_EDITOR
+            DrawHearingRadiusHandle();
+            UnityEditor.Handles.Label(
+                HearingCenter + Vector2.up * (HearingRadius + 0.25f),
+                $"喷火音效听觉半径 {HearingRadius:0.##}（音量 = 1 - 距离/半径）\n圆心满音量 · {HearingRadius * 0.5f:0.##} 处半音量 · 边缘为 0");
+#endif
+        }
     }
 
     private void DrawDamageBox()
@@ -500,5 +673,56 @@ public class FlameThrowerTrap : MonoBehaviour
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(nozzle, 0.06f);
     }
+
+    /// <summary>画出喷火音效的圆形听觉范围（半径 / 圆心与运行时检测完全一致）。</summary>
+    private void DrawHearingCircle(float alpha)
+    {
+        Vector3 center = new Vector3(HearingCenter.x, HearingCenter.y, 0f);
+        float r = HearingRadius;
+
+        Color fillColor = hearingGizmoColor;
+        fillColor.a = 0.07f * alpha;
+        Gizmos.color = fillColor;
+        Gizmos.DrawSphere(center, r);
+
+        Color wireColor = hearingGizmoColor;
+        wireColor.a = Mathf.Clamp01(hearingGizmoColor.a * alpha);
+        Gizmos.color = wireColor;
+        Gizmos.DrawWireSphere(center, r);
+
+        // 半音量参考圈（半径的一半处，音量正好 0.5），方便直观看到距离与音量的关系
+        Color innerColor = hearingGizmoColor;
+        innerColor.a = 0.45f * alpha;
+        Gizmos.color = innerColor;
+        Gizmos.DrawWireSphere(center, r * 0.5f);
+
+        // 圆心十字，便于看清听觉圆的中心
+        Gizmos.color = wireColor;
+        float crossSize = Mathf.Max(0.12f, r * 0.05f);
+        Gizmos.DrawLine(center - Vector3.right * crossSize, center + Vector3.right * crossSize);
+        Gizmos.DrawLine(center - Vector3.up * crossSize, center + Vector3.up * crossSize);
+    }
+
+#if UNITY_EDITOR
+    /// <summary>选中时在圆右侧边缘放一个拖拽手柄，直接拖就能改听觉半径。</summary>
+    private void DrawHearingRadiusHandle()
+    {
+        Vector3 center = new Vector3(HearingCenter.x, HearingCenter.y, 0f);
+        Vector3 handlePos = center + Vector3.right * HearingRadius;
+
+        UnityEditor.Handles.color = hearingGizmoColor;
+        float handleSize = UnityEditor.HandleUtility.GetHandleSize(handlePos) * 0.06f;
+
+        UnityEditor.EditorGUI.BeginChangeCheck();
+        var fmh_674_24_639302928269654815 = Quaternion.identity; Vector3 newPos = UnityEditor.Handles.FreeMoveHandle(
+            handlePos, handleSize, Vector3.zero, UnityEditor.Handles.DotHandleCap);
+        if (UnityEditor.EditorGUI.EndChangeCheck())
+        {
+            UnityEditor.Undo.RecordObject(this, "调整喷火音效听觉半径");
+            float newRadius = new Vector2(newPos.x - center.x, newPos.y - center.y).magnitude;
+            hearingRadius = Mathf.Max(0.1f, newRadius);
+        }
+    }
+#endif
     #endregion
 }

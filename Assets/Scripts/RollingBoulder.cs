@@ -30,6 +30,8 @@ public class RollingBoulder : MonoBehaviour
     [Header("=== 引用 ===")]
     [Tooltip("巨石渲染器（留空自动取同物体上的 SpriteRenderer）")]
     [SerializeField] private SpriteRenderer spriteRenderer;
+    [Tooltip("滚石触发音效播放器；播放的音效配置在同物体的 TriggeredAudio2D 上")]
+    [SerializeField] private TriggeredAudio2D triggeredAudio;
 
     [Header("=== 滚动手感（重点调试区） ===")]
     [Tooltip("触发瞬间给的初始水平速度（世界单位/秒），保证能从金字塔顶脱离")]
@@ -234,7 +236,18 @@ public class RollingBoulder : MonoBehaviour
         rb.angularVelocity = 0f;
         rb.WakeUp();
 
+        PlayStoneFallSound();
+
         if (debugLogs) Debug.Log($"[{name}] 触发滚动，方向={(rollDirection < 0 ? "左" : "右")}");
+    }
+
+    /// <summary>滚石开始滚动时播放一次性音效（每局只播放一次，小羊死亡复位后才会再触发）。</summary>
+    private void PlayStoneFallSound()
+    {
+        if (triggeredAudio == null) triggeredAudio = GetComponent<TriggeredAudio2D>();
+        if (triggeredAudio == null) return;
+
+        triggeredAudio.PlayDefaultOneshot();
     }
 
     private void StopAndHold()

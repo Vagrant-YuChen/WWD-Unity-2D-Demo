@@ -17,9 +17,6 @@ public class QuicksandTrap : MonoBehaviour
     [Tooltip("尸体下沉过程中最终降到的 Order in Layer（0 表示被场景中所有对象遮挡）")]
     [SerializeField] private int targetSortingOrder = 0;
 
-    [Tooltip("死亡触发音效（可选）")]
-    [SerializeField] private AudioClip deathSound;
-
     [Header("=== 滚石专用下沉（只影响滚石，不影响小羊） ===")]
     [Tooltip("滚石下沉深度（世界单位）。滚石比小羊大，通常要填得比上面的大")]
     [SerializeField] private float boulderSinkDepth = 2f;
@@ -44,20 +41,11 @@ public class QuicksandTrap : MonoBehaviour
 
     #region 私有状态
     private Collider2D trapCollider;
-    private AudioSource audioSource;
     #endregion
 
     private void Awake()
     {
         trapCollider = GetComponent<Collider2D>();
-
-        if (deathSound != null && !TryGetComponent(out audioSource))
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.clip = deathSound;
-            audioSource.volume = 0.8f;
-            audioSource.playOnAwake = false;
-        }
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -88,14 +76,8 @@ public class QuicksandTrap : MonoBehaviour
         BunnyController bunny = BunnyContactUtility.FindBunny(other);
         if (bunny == null || bunny.isDead) return;
 
-        // 触发死亡（播放死亡动画、进入复活倒计时）
+        // 触发死亡（播放死亡动画、进入复活倒计时）。死亡语音统一由角色控制器播放。
         bunny.TriggerDeath();
-
-        // 播放音效
-        if (audioSource != null && deathSound != null)
-        {
-            audioSource.PlayOneShot(deathSound);
-        }
 
         // 尸体下沉
         StartCoroutine(SinkCorpse(bunny));

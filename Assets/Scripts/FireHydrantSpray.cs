@@ -58,10 +58,8 @@ public class FireHydrantSpray : MonoBehaviour
     [Tooltip("命中时是否杀死小羊")]
     [SerializeField] private bool killPlayerOnHit = true;
 
-    [Header("=== 表现 ===")]
-    [Tooltip("水柱命中音效（可选）")]
-    [SerializeField] private AudioClip killSound;
-    [SerializeField, Range(0f, 1f)] private float killSoundVolume = 0.8f;
+    // 死亡语音已统一由角色控制器（SheepController.TriggerDeath）播放，
+    // 此陷阱不再单独配置死亡音效，避免音量不一致 / 3D 距离衰减。
 
     [Header("=== 调试 ===")]
     [SerializeField] private bool debugLogs = false;
@@ -272,7 +270,6 @@ public class FireHydrantSpray : MonoBehaviour
         float angle = transform.eulerAngles.z;
 
         Collider2D[] hits = Physics2D.OverlapBoxAll(center, size, angle, playerLayer);
-        bool killedAny = false;
 
         for (int i = 0; i < hits.Length; i++)
         {
@@ -282,14 +279,12 @@ public class FireHydrantSpray : MonoBehaviour
             BunnyController bunny = BunnyContactUtility.FindBunny(hit);
             if (bunny == null || bunny.isDead) continue;
 
+            // 死亡语音统一由角色控制器（SheepController.TriggerDeath）播放，这里不再重复播放，
+            // 避免与其他死法音量不一致 / 3D PlayClipAtPoint 随镜头远近衰减。
             bunny.TriggerDeath();
-            killedAny = true;
 
             if (debugLogs) Debug.Log($"[{name}] 水柱命中 {bunny.name}（第 {CurrentFrame} 帧），触发死亡。");
         }
-
-        if (killedAny && killSound != null)
-            AudioSource.PlayClipAtPoint(killSound, center, killSoundVolume);
     }
     #endregion
 

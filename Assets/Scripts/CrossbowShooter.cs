@@ -93,6 +93,9 @@ public class CrossbowShooter : MonoBehaviour
     private bool arrowPending;
     private float arrowReleaseTimer;
     private bool warnedIntervalClamped;
+
+    // 同物体上的 ProximityLoopAudio2D，用来读取弩箭发射音长度，让飞掠音无缝衔接
+    private ProximityLoopAudio2D loopAudio;
     #endregion
 
     #region 对外可调接口（运行时也可以改）
@@ -121,11 +124,26 @@ public class CrossbowShooter : MonoBehaviour
     public Vector2 SpawnPosition => GetMuzzleWorldPosition() + FireDirection * spawnClearance;
     #endregion
 
+    /// <summary>当前射击动画的归一化进度；不在一轮射击动画期间时返回 false。</summary>
+    public bool TryGetShotProgress(out float normalizedTime)
+    {
+        normalizedTime = 0f;
+        if (!syncActive || shooterAnimator == null) return false;
+
+        AnimatorStateInfo state = shooterAnimator.GetCurrentAnimatorStateInfo(0);
+        if (state.shortNameHash != shooterHash) return false;
+
+        normalizedTime = Mathf.Repeat(state.normalizedTime, 1f);
+        return true;
+    }
+
     private void Awake()
     {
         if (shooterAnimator == null) shooterAnimator = GetComponent<Animator>();
         shooterHash = Animator.StringToHash(shooterStateName);
         idleHash = Animator.StringToHash(idleStateName);
+
+        loopAudio = GetComponent<ProximityLoopAudio2D>();
 
         EnforceSortingOrder();
     }
@@ -343,6 +361,13 @@ public class CrossbowShooter : MonoBehaviour
             Destroy(arrowGo);
             return;
         }
+
+        // 让飞掠音在弩箭发射音（ProximityLoopAudio2D 的 loopClip，即 SFX_Pieces_Crossbow_Shot）播完后无缝衔接。
+        // 发射音时长作为飞掠音的启动延迟，必须在 Launch 之前设置好。
+        float shotSoundLength = 0f;
+        if (loopAudio != null && loopAudio.LoopClip != null) shotSoundLength = loopAudio.LoopClip.length;
+        else if (fireSound != null) shotSoundLength = fireSound.length;
+        arrow.FlyByStartDelay = shotSoundLength;
 
         arrow.Launch(dir, arrowSpeed, this);
 

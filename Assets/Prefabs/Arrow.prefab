@@ -210,4 +210,15 @@ MonoBehaviour:
   loopFlyAnimation: 1
   breakDurationFallback: 0.7
   maxLifetime: 8
+  flyByClip: {fileID: 8300000, guid: d0a904326188a884697e84a41c287389, type: 3}
+  hitSolidsClip: {fileID: 8300000, guid: e5e03c3313ea9454ba510f0136b4d75c, type: 3}
+  hitPlayerClip: {fileID: 8300000, guid: 1f077d0ca58a4714e88b2f887ae99db5, type: 3}
+  flyByStartDelay: 0
+  rangeOrigin: {fileID: 0}
+  hearingRadius: 4
+  maxVolume: 0.6
+  volumeCurve: 2
+  audioPlayerLayer:
+    serializedVersion: 2
+    m_Bits: 4294967295
   debugLogs: 0

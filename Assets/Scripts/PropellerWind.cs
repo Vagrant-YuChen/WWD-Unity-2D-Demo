@@ -7,7 +7,7 @@ using UnityEngine;
 /// 身体完全离开风道后风力立即消失、恢复正常重力，风扇也会自动停下，
 /// 必须等小羊再次用脚碰到顶部碰撞体才会重新启动。
 /// </summary>
-public class PropellerWind : MonoBehaviour
+public class PropellerWind : MonoBehaviour, TriggeredAudio2D.IActivityAudioSource
 {
     #region 启动触发
     [Header("=== 启动触发 ===")]
@@ -69,10 +69,6 @@ public class PropellerWind : MonoBehaviour
     [SerializeField] private string spinningParameter = "Spinning";
     [Tooltip("启动/停止时开关的风特效（可选）")]
     [SerializeField] private GameObject windEffect;
-    [Tooltip("持续风声（可选）")]
-    [SerializeField] private AudioClip windLoopSound;
-    [Range(0f, 1f)]
-    [SerializeField] private float windVolume = 0.5f;
     [SerializeField] private bool debugLogs = false;
     #endregion
 
@@ -86,7 +82,6 @@ public class PropellerWind : MonoBehaviour
     private float nextActivationTime;
     private bool landingHoldStarted;
     private float landingHoldUntil;
-    private AudioSource windAudio;
     private bool warnedMissingAnimatorParameter;
     private static readonly Collider2D[] overlapBuffer = new Collider2D[16];
     #endregion
@@ -94,6 +89,9 @@ public class PropellerWind : MonoBehaviour
     #region 对外只读
     /// <summary>风扇当前是否在吹风。</summary>
     public bool IsFanActive => fanActive;
+
+    /// <summary>风扇当前是否在转动（用于 TriggeredAudio2D 自动开/掐循环音）。</summary>
+    public bool IsAudioActive => fanActive;
 
     /// <summary>当前风道矩形（世界坐标）。</summary>
     public Rect WindArea => ComputeWindRect(activationCollider);
@@ -112,15 +110,6 @@ public class PropellerWind : MonoBehaviour
         }
 
         SetupAnimator();
-
-        if (windLoopSound != null)
-        {
-            if (!TryGetComponent(out windAudio)) windAudio = gameObject.AddComponent<AudioSource>();
-            windAudio.clip = windLoopSound;
-            windAudio.loop = true;
-            windAudio.playOnAwake = false;
-            windAudio.volume = windVolume;
-        }
 
         if (windEffect != null && windEffect != gameObject) windEffect.SetActive(false);
         SetAnimatorSpinning(false);
@@ -216,7 +205,6 @@ public class PropellerWind : MonoBehaviour
 
         SetAnimatorSpinning(true);
         if (windEffect != null && windEffect != gameObject) windEffect.SetActive(true);
-        if (windAudio != null && !windAudio.isPlaying) windAudio.Play();
 
         if (debugLogs) Debug.Log($"[{name}] 风扇启动：{sheep.name}");
     }
@@ -239,7 +227,6 @@ public class PropellerWind : MonoBehaviour
 
         SetAnimatorSpinning(false);
         if (windEffect != null && windEffect != gameObject) windEffect.SetActive(false);
-        if (windAudio != null && windAudio.isPlaying) windAudio.Stop();
 
         if (debugLogs) Debug.Log($"[{name}] 风扇停止");
     }

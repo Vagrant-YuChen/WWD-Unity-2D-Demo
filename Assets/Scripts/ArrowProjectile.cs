@@ -53,6 +53,25 @@ public class ArrowProjectile : MonoBehaviour
     [Tooltip("最长存活时间（秒），防止漏网的箭矢永远留在场景里")]
     [SerializeField, Min(0.1f)] private float maxLifetime = 8f;
 
+    [Header("=== 箭矢音效 ===")]
+    [Tooltip("飞行中循环播放的飞掠音（loop = true）。在弩箭发射音 SFX_Pieces_Crossbow_Shot 播放结束后立即开始，与飞行同步")]
+    [SerializeField] private AudioClip flyByClip;
+    [Tooltip("命中实体障碍物（如金字塔楼梯 PyramidStair）的一次性音效")]
+    [SerializeField] private AudioClip hitSolidsClip;
+    [Tooltip("命中玩家（羊 Sheep）的一次性音效")]
+    [SerializeField] private AudioClip hitPlayerClip;
+    [Tooltip("飞掠音启动延迟（秒）。CrossbowShooter 发射时会按弩箭发射音长度自动覆盖，确保飞掠音与发射音无缝衔接；手动放置时按此值")]
+    [SerializeField, Min(0f)] private float flyByStartDelay = 0f;
+
+    [Header("=== 音量距离衰减（与 ProximityLoopAudio2D 一致）===")]
+    [Tooltip("音量衰减圆心。留空 = 箭矢自身位置，即声音随箭矢在世界中的位置衰减")]
+    [SerializeField] private Transform rangeOrigin;
+    [SerializeField, Min(0.1f)] private float hearingRadius = 10f;
+    [SerializeField, Range(0f, 1f)] private float maxVolume = 1f;
+    [SerializeField] private ProximityLoopAudio2D.VolumeCurve volumeCurve = ProximityLoopAudio2D.VolumeCurve.Squared;
+    [Tooltip("用于就近查找活着的玩家（羊/兔）以计算距离衰减，与命中判定的 playerLayer 复用同一套层")]
+    [SerializeField] private LayerMask audioPlayerLayer = ~0;
+
     [Header("=== 调试 ===")]
     [SerializeField] private bool debugLogs = false;
     #endregion
@@ -66,12 +85,21 @@ public class ArrowProjectile : MonoBehaviour
     private float lifeTimer;
     private int flyHash;
     private int breakHash;
+
+    // 音频
+    private AudioSource flyBySource;    // 循环播放飞掠音
+    private AudioSource oneShotSource;  // 播放命中一次性音效
+    private float flyByTimer;
+    private bool flyByActive;
     #endregion
 
     #region 对外只读接口
     public bool IsBroken => broken;
     public Vector2 FlyDirection => flyDirection;
     public float FlySpeed => flySpeed;
+
+    /// <summary>飞掠音启动延迟（秒），由 CrossbowShooter 在发射时按弩箭发射音长度设置。</summary>
+    public float FlyByStartDelay { get => flyByStartDelay; set => flyByStartDelay = value; }
     #endregion
 
     private void Awake()
@@ -97,6 +125,19 @@ public class ArrowProjectile : MonoBehaviour
         rb.useFullKinematicContacts = true; // 兼容实体碰撞体，Trigger 回调也更稳
         rb.interpolation = RigidbodyInterpolation2D.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+
+        // 音频声道：飞掠音走循环声道，命中音走一次性声道，互不打断
+        flyBySource = gameObject.AddComponent<AudioSource>();
+        flyBySource.playOnAwake = false;
+        flyBySource.loop = true;
+        flyBySource.spatialBlend = 0f; // 2D 音，音量靠脚本按距离衰减（与 ProximityLoopAudio2D 一致）
+        flyBySource.dopplerLevel = 0f;
+
+        oneShotSource = gameObject.AddComponent<AudioSource>();
+        oneShotSource.playOnAwake = false;
+        oneShotSource.loop = false;
+        oneShotSource.spatialBlend = 0f;
+        oneShotSource.dopplerLevel = 0f;
     }
 
     private void Start()
@@ -121,6 +162,7 @@ public class ArrowProjectile : MonoBehaviour
             return;
         }
 
+        UpdateFlyByAudio();
         LoopFlyAnimation();
     }
 
@@ -151,11 +193,20 @@ public class ArrowProjectile : MonoBehaviour
         broken = false;
         lifeTimer = 0f;
 
+        // 飞掠音：延迟到弩箭发射音结束后再开始（延迟时长由 CrossbowShooter 按发射音长度设置）
+        flyByTimer = flyByStartDelay;
+        flyByActive = false;
+        if (flyBySource != null)
+        {
+            flyBySource.Stop();
+            flyBySource.clip = null;
+        }
+
         ApplyRotation();
         PlayFlyAnimation();
         IgnoreOwnerColliders();
 
-        if (debugLogs) Debug.Log($"[{name}] 发射：dir={flyDirection}, speed={flySpeed}");
+        if (debugLogs) Debug.Log($"[{name}] 发射：dir={flyDirection}, speed={flySpeed}, flyByDelay={flyByStartDelay}");
     }
 
     private void ApplyRotation()
@@ -218,6 +269,7 @@ public class ArrowProjectile : MonoBehaviour
             if (bunny != null && !bunny.isDead)
             {
                 if (killPlayerOnHit) bunny.TriggerDeath();
+                PlayHitSound(hitPlayerClip);
                 if (debugLogs) Debug.Log($"[{name}] 命中玩家，破碎。");
                 Break();
                 return;
@@ -228,6 +280,7 @@ public class ArrowProjectile : MonoBehaviour
         // 明确配置了障碍物层：命中即破碎
         if (obstacleLayer.value != 0 && IsInLayerMask(other.gameObject.layer, obstacleLayer))
         {
+            PlayHitSound(hitSolidsClip);
             if (debugLogs) Debug.Log($"[{name}] 命中障碍物层，破碎。");
             Break();
             return;
@@ -236,6 +289,7 @@ public class ArrowProjectile : MonoBehaviour
         // 默认策略：任意实体碰撞体都算障碍物；Trigger 区域（金币、镜头区域等）直接穿过
         if (breakOnAnySolidCollider && !other.isTrigger)
         {
+            PlayHitSound(hitSolidsClip);
             if (debugLogs) Debug.Log($"[{name}] 命中实体碰撞体 {other.name}，破碎。");
             Break();
         }
@@ -253,6 +307,8 @@ public class ArrowProjectile : MonoBehaviour
     {
         if (broken) return;
         broken = true;
+
+        StopFlyBy();
 
         if (hitCollider != null) hitCollider.enabled = false;
         if (rb != null)
@@ -295,6 +351,105 @@ public class ArrowProjectile : MonoBehaviour
     private static bool IsInLayerMask(int layer, LayerMask mask)
     {
         return (mask.value & (1 << layer)) != 0;
+    }
+    #endregion
+
+    #region 音效
+    /// <summary>
+    /// 每帧更新飞掠音：延迟计时结束后开始循环播放，并持续按到玩家的距离刷新音量。
+    /// </summary>
+    private void UpdateFlyByAudio()
+    {
+        // 延迟启动：等弩箭发射音 SFX_Pieces_Crossbow_Shot 播完再无缝衔接飞掠音
+        if (!flyByActive)
+        {
+            flyByTimer -= Time.deltaTime;
+            if (flyByTimer <= 0f) StartFlyBy();
+        }
+
+        if (flyByActive && flyBySource != null)
+        {
+            flyBySource.volume = DistanceVolume();
+        }
+    }
+
+    private void StartFlyBy()
+    {
+        flyByActive = true;
+        if (flyBySource == null || flyByClip == null) return;
+
+        flyBySource.clip = flyByClip;
+        flyBySource.loop = true;
+        flyBySource.volume = DistanceVolume();
+        flyBySource.Play();
+
+        if (debugLogs) Debug.Log($"[{name}] 飞掠音开始（音量={flyBySource.volume:0.00}）。");
+    }
+
+    private void StopFlyBy()
+    {
+        flyByActive = false;
+        if (flyBySource != null)
+        {
+            flyBySource.Stop();
+            flyBySource.clip = null;
+        }
+    }
+
+    /// <summary>在箭矢当前位置播放一次性命中音效，音量按到玩家的距离衰减。</summary>
+    private void PlayHitSound(AudioClip clip)
+    {
+        if (clip == null || oneShotSource == null) return;
+
+        float volume = DistanceVolume();
+        oneShotSource.PlayOneShot(clip, volume);
+
+        if (debugLogs) Debug.Log($"[{name}] 命中音效 {clip.name}（音量={volume:0.00}）。");
+    }
+
+    /// <summary>按到最近活着的玩家的距离计算当前音量，算法与 ProximityLoopAudio2D 一致。</summary>
+    private float DistanceVolume()
+    {
+        float distance = TryGetNearestPlayerDistance(out float d) ? d : float.MaxValue;
+        return Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(distance));
+    }
+
+    private float VolumeScaleAtDistance(float distance)
+    {
+        float remaining = Mathf.Clamp01(1f - distance / Mathf.Max(0.1f, hearingRadius));
+        switch (volumeCurve)
+        {
+            case ProximityLoopAudio2D.VolumeCurve.SquareRoot:
+                return Mathf.Sqrt(remaining);
+            case ProximityLoopAudio2D.VolumeCurve.Squared:
+                return remaining * remaining;
+            default:
+                return remaining;
+        }
+    }
+
+    private bool TryGetNearestPlayerDistance(out float distance)
+    {
+        distance = float.MaxValue;
+
+        // 缩放过的箭矢用 world position 更稳，直接取 transform.position
+        Vector2 center = rangeOrigin != null ? (Vector2)rangeOrigin.position : (Vector2)transform.position;
+        float searchRadius = Mathf.Max(0.1f, hearingRadius) + 2f;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(center, searchRadius, audioPlayerLayer);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D hit = hits[i];
+            if (hit == null) continue;
+
+            BunnyController player = BunnyContactUtility.FindBunny(hit);
+            if (player == null || player.isDead) continue;
+
+            float d = Vector2.Distance(center, player.transform.position);
+            if (d < distance) distance = d;
+        }
+
+        return distance < float.MaxValue;
     }
     #endregion
 
