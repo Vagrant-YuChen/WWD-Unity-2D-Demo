@@ -26,6 +26,11 @@ public class CoinPopOut : MonoBehaviour
     [Tooltip("判定为“落到一个朝上的面”的接触法线阈值（0~1）。用于避免撞到天花板/侧墙就冻结")]
     [Range(0f, 1f)]
     [SerializeField] private float landingNormalThreshold = 0.5f;
+
+    [Header("=== 音效 ===")]
+    [Tooltip("金币弹出音效（在金币被顶出的那一帧播放一次）")]
+    [SerializeField] private AudioClip popSound;
+    [SerializeField, Range(0f, 1f)] private float popSoundVolume = 1f;
     #endregion
 
     #region 运行时状态
@@ -34,6 +39,7 @@ public class CoinPopOut : MonoBehaviour
     private SpriteRenderer spriteRenderer;
     private CoinPickup coinPickup;
     private Collider2D ignoredCollider;
+    private AudioSource popSource;
 
     private bool launched;
     private bool landed;
@@ -141,6 +147,26 @@ public class CoinPopOut : MonoBehaviour
         // 再次确认忽略兔子碰撞（激活瞬间可能重置过）
         if (ignoredCollider != null && bodyCollider != null)
             Physics2D.IgnoreCollision(bodyCollider, ignoredCollider, true);
+
+        // 金币被顶出的同一帧播放弹出音效。
+        PlayPopSound();
+    }
+
+    private void PlayPopSound()
+    {
+        if (popSound == null) return;
+
+        if (popSource == null)
+        {
+            popSource = GetComponent<AudioSource>();
+            if (popSource == null) popSource = gameObject.AddComponent<AudioSource>();
+            popSource.playOnAwake = false;
+            popSource.loop = false;
+            popSource.spatialBlend = 0f;   // 2D：弹出音效音量稳定，不随镜头远近变化
+            popSource.dopplerLevel = 0f;
+        }
+
+        popSource.PlayOneShot(popSound, popSoundVolume * GameAudioManager.SfxMultiplier);
     }
 
     /// <summary>

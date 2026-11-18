@@ -108,9 +108,8 @@ public class FlameThrowerTrap : MonoBehaviour
     [SerializeField] private Color hearingGizmoColor = new Color(0.2f, 0.9f, 1f, 0.9f);
 
     [Header("=== 表现 ===")]
-    [Tooltip("火焰命中音效（可选）")]
-    [SerializeField] private AudioClip killSound;
-    [SerializeField, Range(0f, 1f)] private float killSoundVolume = 0.8f;
+    // 死亡语音已统一由角色控制器（BunnyController.TriggerDeath）播放，
+    // 此陷阱不再单独配置死亡音效，避免音量不一致 / 3D 距离衰减。
 
     [Header("=== 调试 ===")]
     [SerializeField] private bool debugLogs = false;
@@ -393,8 +392,6 @@ public class FlameThrowerTrap : MonoBehaviour
             angle,
             playerLayer);
 
-        bool killedAny = false;
-
         for (int i = 0; i < hits.Length; i++)
         {
             Collider2D hit = hits[i];
@@ -403,14 +400,11 @@ public class FlameThrowerTrap : MonoBehaviour
             BunnyController bunny = BunnyContactUtility.FindBunny(hit);
             if (bunny == null || bunny.isDead) continue;
 
+            // 死亡语音统一由角色控制器（BunnyController.TriggerDeath）播放，这里不再重复播放。
             bunny.TriggerDeath();
-            killedAny = true;
 
             if (debugLogs) Debug.Log($"[{name}] 火焰烧到 {bunny.name}（第 {CurrentFrame} 帧），触发死亡。");
         }
-
-        if (killedAny && killSound != null)
-            AudioSource.PlayClipAtPoint(killSound, center, killSoundVolume);
     }
     #endregion
 
@@ -459,7 +453,7 @@ public class FlameThrowerTrap : MonoBehaviour
         // 用 Play() + 逐帧改 volume 的方式播放，而不是 PlayOneShot 固定音量，
         // 这样兔子在喷火过程中走动时，听到的音量会随距离连续变化。
         spraySfxSource.clip = spraySound;
-        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale);
+        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale * GameAudioManager.SfxMultiplier);
         spraySfxSource.Play();
 
         if (debugLogs)
@@ -478,7 +472,7 @@ public class FlameThrowerTrap : MonoBehaviour
             ? VolumeScaleAtDistance(distance)
             : 0f;
 
-        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale);
+        spraySfxSource.volume = Mathf.Clamp01(spraySoundVolume * volumeScale * GameAudioManager.SfxMultiplier);
     }
 
     /// <summary>找到离听觉圆心最近的活着的兔子；输出它到圆心的直线距离（不限半径，圈外也算）。</summary>

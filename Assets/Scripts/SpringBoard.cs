@@ -126,7 +126,7 @@ public class SpringBoard : MonoBehaviour
 
         if (audioSource != null && bounceSound != null)
         {
-            audioSource.PlayOneShot(bounceSound, bounceVolume);
+            audioSource.PlayOneShot(bounceSound, bounceVolume * GameAudioManager.SfxMultiplier);
         }
     }
 

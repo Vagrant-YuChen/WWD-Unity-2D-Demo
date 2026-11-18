@@ -411,7 +411,7 @@ public class ArrowProjectile : MonoBehaviour
     private float DistanceVolume()
     {
         float distance = TryGetNearestPlayerDistance(out float d) ? d : float.MaxValue;
-        return Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(distance));
+        return Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(distance) * GameAudioManager.SfxMultiplier);
     }
 
     private float VolumeScaleAtDistance(float distance)

@@ -96,6 +96,8 @@ namespace RunningGame.UI
             // 记录这一帧是"空格"关闭的，让角色忽略这次空格，避免开局自动跳。
             if (space) SpaceResumeFrame = Time.frameCount;
 
+            // 用回车 / 空格"触发 Resume"时也播放点击音效。
+            UiSfxPlayer.PlayClickSound();
             Close();
         }
 

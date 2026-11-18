@@ -11,9 +11,6 @@ public class BladeKill : MonoBehaviour
     [Tooltip("是否只触发一次死亡（比如旋转刀片设为false，一次性刀片设为true）")]
     [SerializeField] private bool triggerOnce = false;
 
-    [Tooltip("死亡触发音效（可选）")]
-    [SerializeField] private AudioClip deathSound;
-
     [Tooltip("刀片碰撞后是否播放动画（可选）")]
     [SerializeField] private Animator bladeAnimator;
 
@@ -22,7 +19,6 @@ public class BladeKill : MonoBehaviour
     #endregion
 
     #region 私有状态
-    private AudioSource audioSource; // 音效组件
     private bool hasTriggered = false; // 防重复触发标记
     private Collider2D bladeCollider; // 刀片碰撞体
     #endregion
@@ -40,15 +36,6 @@ public class BladeKill : MonoBehaviour
 
         // 强制设置碰撞体为触发器（避免物理碰撞，只检测接触）
         bladeCollider.isTrigger = true;
-
-        // 自动添加音效组件（如果配置了音效）
-        if (deathSound != null && !TryGetComponent(out audioSource))
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.clip = deathSound;
-            audioSource.volume = 0.8f;
-            audioSource.playOnAwake = false;
-        }
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -80,15 +67,9 @@ public class BladeKill : MonoBehaviour
     #endregion
 
     #region 辅助方法
-    // 触发刀片特效（音效+动画）
+    // 触发刀片特效（动画）。死亡语音统一由角色控制器播放，这里不再单独播放。
     private void TriggerBladeEffect()
     {
-        // 播放死亡音效
-        if (audioSource != null && deathSound != null)
-        {
-            audioSource.PlayOneShot(deathSound);
-        }
-
         // 播放刀片碰撞动画
         if (bladeAnimator != null && !string.IsNullOrEmpty(hitAnimTrigger))
         {

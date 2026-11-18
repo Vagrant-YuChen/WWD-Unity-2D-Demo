@@ -29,13 +29,25 @@ public class FlagVictory : MonoBehaviour
     [Tooltip("重玩/继续时加载的场景名")]
     public string reloadSceneName = "GameScene2";
 
+    [Header("=== 胜利音效（想调音量就在这里，不在 ResultPanel 上）===")]
+    [Tooltip("胜利音效：胜利时全局静音后播出一次，播完即止（不循环）")]
+    [SerializeField] private AudioClip victorySound;
+    [Tooltip("胜利音效音量（0~1）。最终音量 = 此值 × 【音效】滑条的全局倍率。觉得太大声就把这里调低。")]
+    [SerializeField, Range(0f, 1f)] private float victorySoundVolume = 0.5f;
+
     private bool won;
+    private AudioSource victorySource;
 
     public static bool HasVictory { get; private set; }
 
     static FlagVictory()
     {
-        UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) => HasVictory = false;
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) =>
+        {
+            HasVictory = false;
+            // 场景切换后必须解除全局静音，否则新场景将没有声音。
+            AudioListener.pause = false;
+        };
     }
 
     private void Awake()
@@ -100,6 +112,9 @@ public class FlagVictory : MonoBehaviour
         won = true;
         HasVictory = true;
 
+        // 胜利：先全局静音（暂停所有音源），再用一条忽略暂停的声道播放一次性胜利音效。
+        PlayVictorySound();
+
         // 本关通关结算：把本局金币并入存档总额（按“每关最高已入账数”只补差额，杜绝重复刷）。
         CoinWallet.BankCurrentLevel();
 
@@ -118,8 +133,35 @@ public class FlagVictory : MonoBehaviour
         if (victoryText != null) victoryText.gameObject.SetActive(true);
     }
 
+    private void PlayVictorySound()
+    {
+        AudioListener.pause = true;
+
+        if (victorySound == null) return;
+
+        if (victorySource == null)
+        {
+            victorySource = gameObject.AddComponent<AudioSource>();
+            victorySource.playOnAwake = false;
+            victorySource.loop = false;
+            victorySource.spatialBlend = 0f;
+            victorySource.dopplerLevel = 0f;
+            victorySource.ignoreListenerPause = true;
+        }
+
+        victorySource.Stop();
+        victorySource.PlayOneShot(victorySound, victorySoundVolume * GameAudioManager.SfxMultiplier);
+    }
+
+    private void StopVictorySound()
+    {
+        if (victorySource != null) victorySource.Stop();
+        AudioListener.pause = false;
+    }
+
     private void OnContinueButtonClick()
     {
+        StopVictorySound();
         Time.timeScale = 1f;
         if (SceneUtility.GetBuildIndexByScenePath(reloadSceneName) != -1)
         {
@@ -134,6 +176,7 @@ public class FlagVictory : MonoBehaviour
 
     private void OnQuitButtonClick()
     {
+        StopVictorySound();
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else

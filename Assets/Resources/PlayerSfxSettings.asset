@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7c8d9e0f1a2b3c4d5e6f708192a3b4c, type: 3}
+  m_Name: PlayerSfxSettings
+  m_EditorClassIdentifier: 
+  jumpClip: {fileID: 8300000, guid: eef7f798f88bc4342aa3db06f66f47e8, type: 3}
+  landClip: {fileID: 8300000, guid: a3bca4a78371dd5448cbd0a69ea818e2, type: 3}
+  bunnyMoveLoopClip: {fileID: 8300000, guid: e886162b29dc28f49bcba93ce22ba28c, type: 3}
+  sheepMoveLoopClip: {fileID: 8300000, guid: cb4f238a48e3bee42bf92ce9d8fa4ecb, type: 3}
+  jumpVolume: 0.3
+  landVolume: 0.3
+  bunnyMoveVolume: 0.45
+  sheepMoveVolume: 0.12
+  landMinFallDistance: 0.2
+  moveStartSpeed: 0.4
+  moveStopSpeed: 0.25
+  moveFadeTime: 0.08

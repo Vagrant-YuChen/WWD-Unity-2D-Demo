@@ -169,7 +169,7 @@ public class OneWayDoorController : MonoBehaviour
 
         sfxSource.playOnAwake = false;
         sfxSource.loop = false;
-        sfxSource.volume = sfxVolume;
+        sfxSource.volume = sfxVolume * GameAudioManager.SfxMultiplier;
         sfxSource.spatialBlend = sfxSpatialBlend;
         sfxSource.dopplerLevel = 0f;
         sfxSource.minDistance = 1f;
@@ -187,7 +187,7 @@ public class OneWayDoorController : MonoBehaviour
         EnsureSfxSource();
         if (sfxSource == null) return;
 
-        sfxSource.volume = sfxVolume;
+        sfxSource.volume = sfxVolume * GameAudioManager.SfxMultiplier;
         sfxSource.spatialBlend = sfxSpatialBlend;
         sfxSource.PlayOneShot(clip);
     }

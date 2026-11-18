@@ -94,6 +94,11 @@ public class BunnyController : MonoBehaviour
     [Header("=== 死亡复活配置 ===")]
     [Tooltip("死亡后复活倒计时")]
     [SerializeField] protected float respawnDelay = 3f;
+    [Tooltip("死亡语音（可选）。所有致死方式（滚石 / 弩箭 / 流沙 / 摆锤 / 消防栓 / 火焰 / 蜂群 / 刀片等）共用这一个片段，" +
+             "统一由角色控制器在死亡瞬间播放，保证同一声、同音量、2D 不随镜头变化")]
+    [SerializeField] protected AudioClip deathVoiceClip;
+    [Tooltip("死亡语音音量（固定，不随距离或镜头变化）")]
+    [SerializeField, Range(0f, 1f)] protected float deathVoiceVolume = 1f;
 
     [Header("=== 动画/落地配置 ===")]
     [Tooltip("判断跳跃顶点的速度阈值")]
@@ -129,6 +134,16 @@ public class BunnyController : MonoBehaviour
     protected Animator anim;
     protected Rigidbody2D rb;
     protected SpriteRenderer spriteRenderer;
+    private AudioSource deathVoiceSource;
+
+    // 角色音效（跳跃 / 落地 / 移动循环）
+    private AudioSource playerSfxSource;    // 跳跃、落地（PlayOneShot）
+    private AudioSource playerMoveSource;   // 移动循环（loop）
+    private bool moveSoundOn;               // 逻辑上是否应播放移动音效
+    private float moveVolumeCurrent;        // 当前淡入淡出音量
+    private bool landSoundPrimed;           // 出生后的首次触地不发声，之后每次"离地->着地"都播
+    private static PlayerSfxSettings cachedPlayerSfx;
+    private static bool cachedPlayerSfxLoaded;
 
     // 输入
     private float horizontalInput;
@@ -173,6 +188,10 @@ public class BunnyController : MonoBehaviour
 
     // 记录本段腾空期间达到的最大下落速度（负值），落地时据此判断是否触发烟尘
     private float lastFallSpeed;
+
+    // 落地音效：追踪本次腾空最高点，用"最高点 - 落地点"的真实下落距离决定是否发声
+    private float airbornePeakY;
+    private bool airborneFallTracking;
 
     // 跳跃弧度（重力顶点过渡）
     private float gravityTransitionTime; // 已过渡的重力时间（越接近目标越接近全重力）
@@ -246,6 +265,8 @@ public class BunnyController : MonoBehaviour
         sprintAllowedInScene = ResolveSprintAllowedInScene();
 
         OnCharacterConfigured();
+
+        InitPlayerSfx();
     }
 
     /// <summary>
@@ -314,6 +335,7 @@ public class BunnyController : MonoBehaviour
                 rb.isKinematic = true;
                 rb.velocity = Vector2.zero;
             }
+            StopMoveSoundImmediate();
             HandleRespawn();
             return;
         }
@@ -335,6 +357,7 @@ public class BunnyController : MonoBehaviour
         ApplyVariableJumpHeight();
         UpdateLandedState();
         UpdateAnimatorParams();
+        UpdateMoveSound();
     }
 
     private void FixedUpdate()
@@ -589,6 +612,20 @@ public class BunnyController : MonoBehaviour
             risingFromJump = false;
         }
 
+        // 追踪本次腾空达到的最高点（用于落地音效按真实下落距离判定）
+        if (!newGrounded)
+        {
+            if (!airborneFallTracking)
+            {
+                airborneFallTracking = true;
+                airbornePeakY = rb.position.y;
+            }
+            else if (rb.position.y > airbornePeakY)
+            {
+                airbornePeakY = rb.position.y;
+            }
+        }
+
         // 仅在"上一帧空中 -> 本帧落地"瞬间置位，避免重复触发
         if (newGrounded && !wasGroundedLastFrame &&
             (rb.velocity.y < LandedSpeedThreshold || lastFallSpeed < -MinSmokeVelocity))
@@ -600,6 +637,19 @@ public class BunnyController : MonoBehaviour
                 SpawnLandingDust(lastFallSpeed);
             }
             lastFallSpeed = 0f;
+        }
+
+        // 角色落地音效：只有本次腾空"最高点 -> 落地点"的下落距离超过阈值才播放，
+        // 避免轻微下台阶 / 贴地抖动频繁触发；出生后的第一次触地不发声。
+        if (newGrounded && !wasGroundedLastFrame)
+        {
+            float fallDistance = airborneFallTracking ? airbornePeakY - rb.position.y : 0f;
+            airborneFallTracking = false;
+
+            if (landSoundPrimed && fallDistance > LandMinFallDistance)
+            {
+                PlayLandSound();
+            }
         }
 
         if (!newGrounded && wasGroundedLastFrame)
@@ -616,6 +666,9 @@ public class BunnyController : MonoBehaviour
 
         wasGroundedLastFrame = isGrounded;
         isGrounded = newGrounded;
+
+        // 完成一帧着地检测后启用落地音效：出生瞬间的首次触地不响，之后任何"离地->着地"都响
+        landSoundPrimed = true;
     }
 
     /// <summary>
@@ -961,6 +1014,8 @@ public class BunnyController : MonoBehaviour
         loGravity = true;
         inJumpArc = true;
 
+        PlayJumpSound();
+
         if (debugLogs) Debug.Log($"[{name}] Jump | air={isAirJump} used={airJumpsUsed}/{maxAirJumps} vy={rb.velocity.y}");
     }
 
@@ -1192,6 +1247,8 @@ public class BunnyController : MonoBehaviour
         springBounceActive = false;
         windControlActive = false;
 
+        StopMoveSoundImmediate();
+
         if (anim != null)
         {
             anim.SetBool("IsDead", true);
@@ -1201,8 +1258,30 @@ public class BunnyController : MonoBehaviour
         PlayDeathVoice();
     }
 
-    /// <summary>角色死亡时的语音/声音。基类为空，由子类（如小羊）按需覆写。</summary>
-    protected virtual void PlayDeathVoice() { }
+    /// <summary>
+    /// 角色死亡时的语音。默认用专属的 2D 声道播放固定音量的 deathVoiceClip，
+    /// 让所有致死方式（无论由哪个陷阱脚本触发）都发出同一个声音、同一音量。
+    /// 子类如无特殊需要无需覆写。
+    /// </summary>
+    protected virtual void PlayDeathVoice()
+    {
+        if (deathVoiceClip == null) return;
+
+        EnsureDeathVoiceSource();
+        deathVoiceSource.PlayOneShot(deathVoiceClip, deathVoiceVolume * GameAudioManager.SfxMultiplier);
+    }
+
+    private void EnsureDeathVoiceSource()
+    {
+        if (deathVoiceSource != null) return;
+
+        // 独立声道：不与其他叫声/环境音互相打断，2D 播放确保任何位置、镜头远近音量恒定
+        deathVoiceSource = gameObject.AddComponent<AudioSource>();
+        deathVoiceSource.playOnAwake = false;
+        deathVoiceSource.loop = false;
+        deathVoiceSource.spatialBlend = 0f;
+        deathVoiceSource.dopplerLevel = 0f;
+    }
 
     public void SetRespawnPosition(Vector3 newPos)
     {
@@ -1335,6 +1414,161 @@ public class BunnyController : MonoBehaviour
             rb.isKinematic = false;
             rb.simulated = true;
             rb.WakeUp();
+        }
+    }
+    #endregion
+
+    #region 角色音效（跳跃 / 落地 / 移动）
+    /// <summary>
+    /// 全局音效设置（Assets/Resources/PlayerSfxSettings）：片段、音量、移动判定都在该资产里调。
+    /// </summary>
+    protected static PlayerSfxSettings PlayerSfxConfig
+    {
+        get
+        {
+            if (!cachedPlayerSfxLoaded)
+            {
+                cachedPlayerSfxLoaded = true;
+                cachedPlayerSfx = Resources.Load<PlayerSfxSettings>("PlayerSfxSettings");
+            }
+            return cachedPlayerSfx;
+        }
+    }
+
+    /// <summary>当前角色使用的移动循环片段：兔子默认，小羊覆写为自己的片段。</summary>
+    protected virtual AudioClip MoveLoopClip =>
+        PlayerSfxConfig != null ? PlayerSfxConfig.bunnyMoveLoopClip : null;
+
+    /// <summary>当前角色使用的移动循环音量：兔子默认，小羊覆写为自己的音量。</summary>
+    protected virtual float MoveLoopVolume =>
+        PlayerSfxConfig != null ? PlayerSfxConfig.bunnyMoveVolume : 0.3f;
+
+    /// <summary>播放落地音效所需的最小下落距离（本次腾空最高点到落地点）。</summary>
+    protected float LandMinFallDistance =>
+        PlayerSfxConfig != null ? PlayerSfxConfig.landMinFallDistance : 0.2f;
+
+    private void InitPlayerSfx()
+    {
+        EnsurePlayerSfxSources();
+        landSoundPrimed = false;
+        moveSoundOn = false;
+        moveVolumeCurrent = 0f;
+        airborneFallTracking = false;
+        airbornePeakY = 0f;
+        if (playerMoveSource != null) playerMoveSource.volume = 0f;
+    }
+
+    private void EnsurePlayerSfxSources()
+    {
+        if (playerSfxSource == null)
+        {
+            playerSfxSource = gameObject.AddComponent<AudioSource>();
+            playerSfxSource.playOnAwake = false;
+            playerSfxSource.loop = false;
+            playerSfxSource.spatialBlend = 0f;
+            playerSfxSource.dopplerLevel = 0f;
+        }
+
+        if (playerMoveSource == null)
+        {
+            playerMoveSource = gameObject.AddComponent<AudioSource>();
+            playerMoveSource.playOnAwake = false;
+            playerMoveSource.loop = true;
+            playerMoveSource.spatialBlend = 0f;
+            playerMoveSource.dopplerLevel = 0f;
+            playerMoveSource.volume = 0f;
+        }
+    }
+
+    private void PlayJumpSound()
+    {
+        PlayerSfxSettings settings = PlayerSfxConfig;
+        if (settings == null || settings.jumpClip == null) return;
+
+        EnsurePlayerSfxSources();
+        playerSfxSource.PlayOneShot(settings.jumpClip, Mathf.Clamp01(settings.jumpVolume * GameAudioManager.SfxMultiplier));
+    }
+
+    private void PlayLandSound()
+    {
+        PlayerSfxSettings settings = PlayerSfxConfig;
+        if (settings == null || settings.landClip == null) return;
+
+        EnsurePlayerSfxSources();
+        playerSfxSource.PlayOneShot(settings.landClip, Mathf.Clamp01(settings.landVolume * GameAudioManager.SfxMultiplier));
+    }
+
+    /// <summary>
+    /// 移动循环音效：在地面且角色自身水平速度超过阈值时播放；
+    /// 离地、水平速度衰减到停止阈值以下、暂停或死亡时淡出停止。
+    /// 用速度而非按键判定：松开 A/D 后惯性滑行期间仍响，顶墙原地推（速度≈0）则停。
+    /// 站在移动平台上被位移携带不会产生自身水平速度，因此不会误触发。
+    /// </summary>
+    private void UpdateMoveSound()
+    {
+        PlayerSfxSettings settings = PlayerSfxConfig;
+        if (settings == null)
+        {
+            StopMoveSoundImmediate();
+            return;
+        }
+
+        EnsurePlayerSfxSources();
+        AudioClip loopClip = MoveLoopClip;
+        if (loopClip == null)
+        {
+            StopMoveSoundImmediate();
+            return;
+        }
+
+        bool groundedForSound = isGrounded && !isDead && Time.timeScale > 0f;
+        float absVx = rb != null ? Mathf.Abs(rb.velocity.x) : 0f;
+
+        // 迟滞：正在播放时用较低的停止阈值，避免在临界速度附近反复启停
+        float threshold = moveSoundOn ? settings.moveStopSpeed : settings.moveStartSpeed;
+        bool shouldBeOn = groundedForSound && absVx > threshold;
+
+        if (shouldBeOn)
+        {
+            if (playerMoveSource.clip != loopClip) playerMoveSource.clip = loopClip;
+
+            if (!moveSoundOn)
+            {
+                moveSoundOn = true;
+                moveVolumeCurrent = 0f;
+                playerMoveSource.volume = 0f;
+                playerMoveSource.Play();
+            }
+            else if (!playerMoveSource.isPlaying)
+            {
+                playerMoveSource.Play();
+            }
+        }
+
+        float moveTargetVolume = Mathf.Clamp01(MoveLoopVolume * GameAudioManager.SfxMultiplier);
+        float targetVolume = shouldBeOn ? moveTargetVolume : 0f;
+        float fadeSpeed = settings.moveFadeTime <= 0.0001f
+            ? float.MaxValue
+            : Mathf.Max(moveTargetVolume, 0.0001f) / settings.moveFadeTime;
+
+        moveVolumeCurrent = Mathf.MoveTowards(moveVolumeCurrent, targetVolume, fadeSpeed * Time.unscaledDeltaTime);
+        playerMoveSource.volume = moveVolumeCurrent;
+
+        if (!shouldBeOn && moveSoundOn && moveVolumeCurrent <= 0.0001f)
+        {
+            playerMoveSource.Stop();
+            moveSoundOn = false;
+        }
+    }
+
+    private void StopMoveSoundImmediate()
+    {
+        moveSoundOn = false;
+        moveVolumeCurrent = 0f;
+        if (playerMoveSource != null)
+        {
+            playerMoveSource.volume = 0f;
+            if (playerMoveSource.isPlaying) playerMoveSource.Stop();
         }
     }
     #endregion

@@ -43,15 +43,6 @@ public class SheepController : BunnyController
     [Tooltip("羊叫音量")]
     [SerializeField, Range(0f, 1f)] private float launchVoiceVolume = 1f;
 
-    #region 死亡语音（统一由角色控制器播放，所有死亡原因共用）
-    [Tooltip("小羊死亡时播放的语音片段。所有死亡原因（滚石 / 弩箭 / 流沙 / 摆锤 / 火 hydrant / 火焰等）共用这一个片段，保证声音统一")]
-    [SerializeField] private AudioClip deathVoiceClip;
-    [Tooltip("死亡语音音量（固定，不随距离或镜头变化）")]
-    [SerializeField, Range(0f, 1f)] private float deathVoiceVolume = 1f;
-
-    private AudioSource deathVoiceSource;
-    #endregion
-
     private AudioSource launchVoiceSource;
     #endregion
 
@@ -231,7 +222,7 @@ public class SheepController : BunnyController
     {
         if (isDead || launchVoiceClip == null) return;
         EnsureLaunchVoiceSource();
-        launchVoiceSource.PlayOneShot(launchVoiceClip, launchVoiceVolume);
+        launchVoiceSource.PlayOneShot(launchVoiceClip, launchVoiceVolume * GameAudioManager.SfxMultiplier);
     }
 
     private void EnsureLaunchVoiceSource()
@@ -246,30 +237,14 @@ public class SheepController : BunnyController
     }
     #endregion
 
-    #region 死亡语音（所有死亡原因统一走这里）
-    /// <summary>
-    /// 由基类 TriggerDeath() 在「首次死亡」时回调一次。
-    /// 用专属的 2D 声道播放固定音量的死亡语音，不受陷阱环境音、镜头距离影响，保证每种死法声音一致。
-    /// </summary>
-    protected override void PlayDeathVoice()
-    {
-        if (deathVoiceClip == null) return;
+    #region 移动音效（小羊专用片段与音量）
+    /// <summary>小羊使用自己的移动循环音效片段。</summary>
+    protected override AudioClip MoveLoopClip =>
+        PlayerSfxConfig != null ? PlayerSfxConfig.sheepMoveLoopClip : null;
 
-        EnsureDeathVoiceSource();
-        deathVoiceSource.PlayOneShot(deathVoiceClip, deathVoiceVolume);
-    }
-
-    private void EnsureDeathVoiceSource()
-    {
-        if (deathVoiceSource != null) return;
-
-        // 独立声道，避免与被加农炮发射等其他羊叫声、或环境音互相打断/覆盖
-        deathVoiceSource = gameObject.AddComponent<AudioSource>();
-        deathVoiceSource.playOnAwake = false;
-        deathVoiceSource.loop = false;
-        deathVoiceSource.spatialBlend = 0f; // 2D：任何死亡位置、镜头远近音量都恒定
-        deathVoiceSource.dopplerLevel = 0f;
-    }
+    /// <summary>小羊使用独立的移动循环音量。</summary>
+    protected override float MoveLoopVolume =>
+        PlayerSfxConfig != null ? PlayerSfxConfig.sheepMoveVolume : 0.3f;
     #endregion
 
     #region 编辑器预览

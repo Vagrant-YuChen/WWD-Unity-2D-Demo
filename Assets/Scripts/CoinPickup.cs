@@ -26,6 +26,11 @@ public class CoinPickup : MonoBehaviour
     [Header("=== 计分配置 ===")]
     [Tooltip("本枚金币的价值（拾取后累加到 TotalCollected）")]
     public int coinValue = 1;
+
+    [Header("=== 音效 ===")]
+    [Tooltip("玩家按 F 拾取金币时播放的音效")]
+    [SerializeField] private AudioClip pickupSound;
+    [SerializeField, Range(0f, 1f)] private float pickupSoundVolume = 1f;
     #endregion
 
     #region 私有变量
@@ -116,6 +121,9 @@ public class CoinPickup : MonoBehaviour
 
         wasPlayerDead = bunnyController != null && bunnyController.isDead;
 
+        // 拾取音效：用独立临时声道播放，保证金币随即隐藏/失活后声音仍能播完。
+        PlayPickupSound();
+
         // 计入本局金币数（通关结算时才并入存档，见 CoinWallet）。
         TotalCollected = Mathf.Max(0, TotalCollected + coinValue);
 
@@ -127,6 +135,27 @@ public class CoinPickup : MonoBehaviour
             if (spriteRenderer != null) spriteRenderer.enabled = false;
             if (bodyCollider != null) bodyCollider.enabled = false;
         }
+    }
+
+    private void PlayPickupSound()
+    {
+        if (pickupSound == null) return;
+
+        // 金币拾取后可能立刻 SetActive(false) 或隐藏，所以用一条独立的临时 2D 声道播放，
+        // 不依附于金币自身，避免声音被一起关掉。播完自动销毁。
+        GameObject go = new GameObject("CoinPickupSFX");
+        go.transform.position = transform.position;
+
+        AudioSource src = go.AddComponent<AudioSource>();
+        src.playOnAwake = false;
+        src.loop = false;
+        src.spatialBlend = 0f;
+        src.dopplerLevel = 0f;
+        src.clip = pickupSound;
+        src.volume = pickupSoundVolume * GameAudioManager.SfxMultiplier;
+        src.Play();
+
+        Destroy(go, pickupSound.length + 0.1f);
     }
 
     /// <summary>蜂巢重置时调用：如果这枚金币已经被拾取，把它的分数退回。</summary>

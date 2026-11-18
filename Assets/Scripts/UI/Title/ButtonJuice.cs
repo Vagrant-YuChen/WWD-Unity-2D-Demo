@@ -4,9 +4,9 @@ using UnityEngine.EventSystems;
 namespace RunningGame.UI
 {
     /// <summary>
-    /// 按钮手感：悬停放大并播放 tick，按下时缩小并播放 click。
+    /// 按钮手感：悬停放大、按下缩小，使用 unscaled 时间平滑缩放。
     /// 指针聚焦（选中）的按钮优先保持放大，光标离开不会缩小；指针移走后才恢复为场景里手工配置的原始缩放。
-    /// 使用 unscaled 时间平滑缩放。
+    /// 音效统一交给自动绑定的 <see cref="UiButtonSfx"/>，本组件只在没有它时用 sfx 兜底发声。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class ButtonJuice : MonoBehaviour,
@@ -56,7 +56,8 @@ namespace RunningGame.UI
         {
             hovering = true;
             RefreshTarget();
-            if (sfx != null) sfx.PlayHover();
+            // 统一由 UiButtonSfx 发声时，这里不再重复播放。
+            if (!UsesCentralSfx && sfx != null) sfx.PlayHover();
         }
 
         // 光标离开：若按钮仍是焦点（指针所指）则继续放大，否则回到原始大小；
@@ -73,7 +74,7 @@ namespace RunningGame.UI
             focused = true;
             if (pressing) return; // 按住时保持按下视觉，松开后由 RefreshTarget 落到焦点放大
             RefreshTarget();
-            if (sfx != null) sfx.PlayHover();
+            // 悬停音效统一由 UiButtonSfx 在获得焦点时播放，这里不再重复。
         }
 
         public void OnDeselect(BaseEventData eventData)
@@ -87,7 +88,13 @@ namespace RunningGame.UI
         {
             pressing = true;
             RefreshTarget();
-            if (sfx != null) sfx.PlayClick();
+            if (!UsesCentralSfx && sfx != null) sfx.PlayClick();
+        }
+
+        // 由 UiButtonSfx（自动绑定）负责声音时，ButtonJuice 只做缩放表现，不再发声。
+        private bool UsesCentralSfx
+        {
+            get { return GetComponent<UiButtonSfx>() != null; }
         }
 
         public void OnPointerUp(PointerEventData eventData)

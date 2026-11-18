@@ -39,6 +39,10 @@ public class ProximityLoopAudio2D : MonoBehaviour
         FollowSpray = 1,
         [Tooltip("每轮射击时，动画播到 triggerFrame 触发一次性音效，Idle 空档期静音")]
         ShotAtFrame = 2,
+        [Tooltip("蜂巢未爆炸（idle）时循环播放；蜂巢爆炸后停止，玩家复活重置蜂巢后再次恢复")]
+        FollowHiveIdle = 3,
+        [Tooltip("蜂群追击玩家期间循环播放；音圈跟随蜂群中心一起移动，胜利/小兔死亡重置后停止")]
+        FollowSwarm = 4,
     }
 
     #region 可配置参数
@@ -63,6 +67,16 @@ public class ProximityLoopAudio2D : MonoBehaviour
     // ShotAtFrame：关联的弩箭脚本，用来读取射击动画进度；在 triggerFrame 处触发一次性音效。
     [Tooltip("ShotAtFrame 模式：同物体上的 CrossbowShooter，读取射击动画进度触发一次性音效")]
     [SerializeField] private CrossbowShooter crossbowShooter;
+    // FollowHiveIdle：关联的蜂巢，读取 HasExploded 决定是否播放 idle 声。
+    [Tooltip("FollowHiveIdle 模式：关联的 BeeHiveExplosion，未爆炸（idle）时循环播放；爆炸后停止，重置后恢复。")]
+    [SerializeField] private BeeHiveExplosion beeHive;
+
+    // FollowSwarm：关联的蜂群控制器，读取 FollowAudioActive 决定是否播放；音圈中心跟随蜂群。
+    [Tooltip("FollowSwarm 模式：关联的 BeeSwarmController，蜂群追击期间循环播放；音圈中心随蜂群中心移动。")]
+    [SerializeField] private BeeSwarmController beeSwarm;
+    [Tooltip("FollowSwarm：蜂群停止追击（击杀小兔）后，音量在多少秒内淡出到 0（避免瞬间掐断）。参考螺旋桨 0.5s。")]
+    [SerializeField, Min(0f)] private float fadeOutDuration = 0.5f;
+
     [Header("ShotAtFrame 参数")]
     [Tooltip("弩箭动画中触发音效的帧序号（按 1 起算，便于对照序列帧命名）。例：第 12 帧 → 填 12；总帧数 25 → 填 25")]
     [SerializeField, Min(0)] private int triggerFrame = 12;
@@ -76,10 +90,21 @@ public class ProximityLoopAudio2D : MonoBehaviour
     #region 运行时状态
     private AudioSource source;
     private bool shotTriggeredThisCycle;
+    private bool fadingOut;
+    private float fadeTimer;
+    private float fadeFromVolume;
     #endregion
 
-    /// <summary>音圈的世界圆心。</summary>
-    public Vector2 AudioCenter => rangeOrigin != null ? (Vector2)rangeOrigin.position : (Vector2)transform.position;
+    /// <summary>音圈的世界圆心。FollowSwarm 模式下跟随蜂群中心移动。</summary>
+    public Vector2 AudioCenter
+    {
+        get
+        {
+            if (playbackMode == PlaybackMode.FollowSwarm && beeSwarm != null)
+                return beeSwarm.SwarmCenter;
+            return rangeOrigin != null ? (Vector2)rangeOrigin.position : (Vector2)transform.position;
+        }
+    }
 
     /// <summary>
     /// 当前循环音频。供弩箭等外部脚本读取长度，用来让「箭矢飞掠音」在弩箭发射音结束后无缝衔接。
@@ -126,6 +151,12 @@ public class ProximityLoopAudio2D : MonoBehaviour
             case PlaybackMode.ShotAtFrame:
                 UpdateShotAtFrame();
                 break;
+            case PlaybackMode.FollowHiveIdle:
+                UpdateFollowHiveIdle();
+                break;
+            case PlaybackMode.FollowSwarm:
+                UpdateFollowSwarm();
+                break;
         }
     }
 
@@ -133,7 +164,7 @@ public class ProximityLoopAudio2D : MonoBehaviour
     private float DistanceVolume()
     {
         float distance = TryGetNearestPlayerDistance(out float d) ? d : float.MaxValue;
-        return Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(distance));
+        return Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(distance) * GameAudioManager.SfxMultiplier);
     }
 
     /// <summary>距离 → 音量倍率（0 = 圈外，1 = 贴脸）。</summary>
@@ -213,7 +244,7 @@ public class ProximityLoopAudio2D : MonoBehaviour
             {
                 shotTriggeredThisCycle = true;
                 float dist = TryGetNearestPlayerDistance(out float d) ? d : float.MaxValue;
-                float vol = Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(dist));
+                float vol = Mathf.Clamp01(maxVolume * VolumeScaleAtDistance(dist) * GameAudioManager.SfxMultiplier);
                 if (vol > 0.0001f)
                 {
                     source.PlayOneShot(loopClip, vol);
@@ -226,6 +257,66 @@ public class ProximityLoopAudio2D : MonoBehaviour
         else
         {
             shotTriggeredThisCycle = false;
+        }
+    }
+
+    /// <summary>蜂巢 idle 声：未爆炸时循环，爆炸后静音（复活重置后再次恢复）。</summary>
+    private void UpdateFollowHiveIdle()
+    {
+        source.loop = true;
+        bool idle = beeHive == null || !beeHive.HasExploded;
+
+        if (idle)
+        {
+            if (!source.isPlaying) source.Play();
+            source.volume = DistanceVolume();
+        }
+        else if (source.isPlaying)
+        {
+            source.Stop();
+        }
+    }
+
+    /// <summary>蜂群追击声：追击期间循环，音圈中心跟随蜂群移动；击杀/胜利/重置后淡出停止。</summary>
+    private void UpdateFollowSwarm()
+    {
+        source.loop = true;
+        bool active = beeSwarm != null && beeSwarm.FollowAudioActive;
+
+        if (active)
+        {
+            // 重新进入追击：取消淡出，恢复按距离的音量
+            fadingOut = false;
+            if (!source.isPlaying) source.Play();
+            source.volume = DistanceVolume();   // AudioCenter 已改为跟随蜂群中心
+            return;
+        }
+
+        if (!source.isPlaying) return;
+
+        // 不再追击（如小兔被击杀）：进入 0.5s 淡出，避免声音瞬间掐断。
+        if (!fadingOut)
+        {
+            fadingOut = true;
+            fadeFromVolume = source.volume;
+            fadeTimer = Mathf.Max(0f, fadeOutDuration);
+            if (fadeTimer <= 0f)
+            {
+                source.Stop();
+                fadingOut = false;
+                return;
+            }
+        }
+
+        fadeTimer -= Time.deltaTime;
+        float k = Mathf.Clamp01(fadeTimer / Mathf.Max(0.0001f, fadeOutDuration));
+        source.volume = fadeFromVolume * k;
+
+        if (fadeTimer <= 0f)
+        {
+            source.Stop();
+            source.volume = 0f;
+            fadingOut = false;
         }
     }
     #endregion

@@ -120,7 +120,7 @@ public sealed class TriggeredAudio2D : MonoBehaviour
         fadeTimer = 0f;
         loopSource.clip = loopClip;
         loopSource.loop = true;
-        loopSource.volume = loopVolume;
+        loopSource.volume = loopVolume * GameAudioManager.SfxMultiplier;
         if (!loopSource.isPlaying) loopSource.Play();
         loopPlaying = true;
     }
@@ -167,11 +167,19 @@ public sealed class TriggeredAudio2D : MonoBehaviour
     public void PlayOneShot(AudioClip clip, float volumeScale = 1f)
     {
         if (clip == null || oneshotSource == null) return;
-        oneshotSource.PlayOneShot(clip, volumeScale);
+        oneshotSource.PlayOneShot(clip, volumeScale * GameAudioManager.SfxMultiplier);
     }
 
     /// <summary>播放 Inspector 里配置的默认一次性音效。</summary>
     public void PlayDefaultOneshot() => PlayOneShot(defaultOneshotClip, defaultOneshotVolume);
+
+    private void OnEnable() => GameAudioManager.SfxMultiplierChanged += OnSfxMultiplierChanged;
+    private void OnDisable() => GameAudioManager.SfxMultiplierChanged -= OnSfxMultiplierChanged;
+    private void OnSfxMultiplierChanged()
+    {
+        if (!loopPlaying || fadingOut || loopSource == null) return;
+        loopSource.volume = loopVolume * GameAudioManager.SfxMultiplier;
+    }
 
     #endregion
 

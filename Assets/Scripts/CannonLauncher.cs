@@ -276,7 +276,7 @@ public class CannonLauncher : MonoBehaviour
 
         if (audioSource != null && fireSound != null)
         {
-            audioSource.PlayOneShot(fireSound, volume);
+            audioSource.PlayOneShot(fireSound, volume * GameAudioManager.SfxMultiplier);
         }
     }
 

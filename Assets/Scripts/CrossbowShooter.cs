@@ -373,7 +373,7 @@ public class CrossbowShooter : MonoBehaviour
 
         if (fireSound != null)
         {
-            AudioSource.PlayClipAtPoint(fireSound, spawnPos, volume);
+            AudioSource.PlayClipAtPoint(fireSound, spawnPos, volume * GameAudioManager.SfxMultiplier);
         }
 
         if (debugLogs) Debug.Log($"[{name}] 发射箭矢：pos={spawnPos}, dir={dir}, speed={arrowSpeed}");

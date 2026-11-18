@@ -144,6 +144,8 @@ public class BeeSwarmController : MonoBehaviour
     private bool swarmGone;
     private float retreatElapsed;
 
+    private bool followAudioRequested;
+
     private Vector2 swarmCenter;
     private Vector2[] history;
     private int historyIndex;
@@ -655,6 +657,7 @@ public class BeeSwarmController : MonoBehaviour
         if (!started || retreating || swarmGone) return;
 
         retreating = true;
+        followAudioRequested = false;   // 玩家死亡后立即掐断追击音效
         retreatElapsed = 0f;
 
         int activeCount = 0;
@@ -727,6 +730,7 @@ public class BeeSwarmController : MonoBehaviour
     public void StopSwarm()
     {
         stopped = true;
+        followAudioRequested = false;   // 胜利后立即掐断追击音效
         if (indicatorContainer != null)
             indicatorContainer.gameObject.SetActive(false);
     }
@@ -751,6 +755,7 @@ public class BeeSwarmController : MonoBehaviour
         allOut = false;
         retreating = false;
         swarmGone = false;
+        followAudioRequested = false;
 
         emergeElapsed = 0f;
         spawnedCount = 0;
@@ -802,6 +807,18 @@ public class BeeSwarmController : MonoBehaviour
 
     /// <summary>外部查询：是否所有蜜蜂都已出巢。</summary>
     public bool HasAllBeesOut => allOut;
+
+    /// <summary>蜂群中心当前位置（供追击音圈跟随移动）。</summary>
+    public Vector2 SwarmCenter => swarmCenter;
+
+    /// <summary>追击音效当前是否应该播放：已请求 + 已出巢 + 未消散 + 未胜利停止。</summary>
+    public bool FollowAudioActive => followAudioRequested && started && !retreating && !swarmGone && !stopped;
+
+    /// <summary>蜂群是否因击杀小兔而进入消散（用于让追击音效在击杀后淡出而不是瞬断）。</summary>
+    public bool IsRetreating => retreating;
+
+    /// <summary>由蜂巢在爆炸动画播到最后一帧时调用：请求开始播放蜂群追击音效。</summary>
+    public void BeginFollowAudio() => followAudioRequested = true;
     #endregion
 
     #region 指示蜜蜂（蜂巢上爬行）

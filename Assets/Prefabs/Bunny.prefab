@@ -313,6 +313,8 @@ MonoBehaviour:
   stepAssistCooldownFrames: 8
   stepAssistTriggerFrames: 3
   respawnDelay: 3
+  deathVoiceClip: {fileID: 8300000, guid: 4e65d8429c274aa4ca338d89b0015cd3, type: 3}
+  deathVoiceVolume: 0.9
   jumpTopThreshold: 0.01
   jumpDownThreshold: -0.01
   landStateResetDelay: 0.15

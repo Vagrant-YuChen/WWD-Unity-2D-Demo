@@ -22,6 +22,8 @@ public class BeeHiveExplosion : MonoBehaviour
     [SerializeField] private GameObject hiddenCoin;
     [Tooltip("蜂群控制器（留空会自动在同物体 / 场景里查找；BeeSwarmSetup 会自动连线）")]
     [SerializeField] private BeeSwarmController beeSwarm;
+    [Tooltip("蜂巢爆炸音效（TriggeredAudio2D）：被触碰引爆的第一帧播放一次性音效")]
+    [SerializeField] private TriggeredAudio2D triggeredAudio;
 
     [Header("=== 爆炸动画 ===")]
     [Tooltip("Animator 中触发爆炸的 Trigger 参数名（BeeHiveSetup 会自动创建）")]
@@ -62,6 +64,7 @@ public class BeeHiveExplosion : MonoBehaviour
     private Sprite originalHiveSprite;
     private BunnyController bunny;
     private bool wasBunnyDead;
+    private bool followStarted;
     #endregion
 
     /// <summary>蜂巢是否已经爆炸（供外部查询）。</summary>
@@ -111,6 +114,20 @@ public class BeeHiveExplosion : MonoBehaviour
         if (wasBunnyDead && !dead)
             ResetIfExploded();
 
+        // 蜂巢已爆炸且追击音效尚未请求：等爆炸序列帧动画播到最后一帧后，
+        // 开始蜂群追击音效（由 ProximityLoopAudio2D 的 FollowSwarm 模式持续播放）。
+        if (exploded && !followStarted)
+        {
+            bool animEnded = hiveAnimator == null
+                || hiveAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime >= 0.999f;
+            if (animEnded)
+            {
+                followStarted = true;
+                ResolveSwarm();
+                if (beeSwarm != null) beeSwarm.BeginFollowAudio();
+            }
+        }
+
         wasBunnyDead = dead;
     }
 
@@ -139,6 +156,9 @@ public class BeeHiveExplosion : MonoBehaviour
     {
         if (exploded) return;
         exploded = true;
+
+        // 爆炸第一帧就播放蜂巢爆裂音效（gore）。
+        if (triggeredAudio != null) triggeredAudio.PlayDefaultOneshot();
 
         if (hiveColliders == null) hiveColliders = GetComponents<Collider2D>();
 
@@ -178,6 +198,7 @@ public class BeeHiveExplosion : MonoBehaviour
 
         exploded = false;
         coinReleased = false;
+        followStarted = false;
 
         if (hiveColliders == null)
             hiveColliders = GetComponents<Collider2D>();
