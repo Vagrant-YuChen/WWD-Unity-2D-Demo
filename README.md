@@ -23,7 +23,6 @@ https://github.com/Vagrant-YuChen/WWD-Unity-2D-Demo/releases/tag/v1.0
 
 ### 存档与金币
 - 金币总数与关卡进度会保存在你的电脑本地。
-- 如需重置金币总数，请在 Unity 编辑器中使用 `Tools > Wacky World Dash > Reset Total Golden Coins`；打包前建议先点一次再重新打包，以确保新存档从 0 开始。
 
 ### 游戏玩法
 游戏内置有玩法说明，请在游戏内查看，这里不再赘述。
